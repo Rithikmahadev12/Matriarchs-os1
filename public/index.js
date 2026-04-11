@@ -1,17 +1,68 @@
 "use strict";
 
 // ══════════════════════════════════════
-//  CLOCK
+//  CLOCK  (both topbar + taskbar)
 // ══════════════════════════════════════
 
 function updateClock() {
-  const el = document.getElementById("clock");
-  if (!el) return;
   const now = new Date();
-  el.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const date = now.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+
+  const topEl  = document.getElementById("clock");
+  const taskEl = document.getElementById("taskbar-clock");
+
+  if (topEl)  topEl.textContent  = time;
+  if (taskEl) taskEl.textContent = date + "  " + time;
 }
 
 setInterval(updateClock, 1000);
+
+
+// ══════════════════════════════════════
+//  ONBOARDING
+// ══════════════════════════════════════
+
+function obContinue() {
+  const input = document.getElementById("ob-name");
+  const name  = input.value.trim();
+  if (!name) {
+    input.style.borderColor = "rgba(255,80,80,0.5)";
+    input.focus();
+    setTimeout(() => { input.style.borderColor = ""; }, 1200);
+    return;
+  }
+
+  // Save name
+  localStorage.setItem("mos_username", name);
+
+  // Transition to step 2
+  document.getElementById("ob-step-1").classList.add("hidden");
+  const step2 = document.getElementById("ob-step-2");
+  step2.classList.remove("hidden");
+
+  document.getElementById("ob-greeting").innerHTML =
+    "Hello, <span>" + name + "</span>";
+}
+
+function obFinish() {
+  const ob = document.getElementById("onboarding");
+  ob.classList.add("fade-out");
+  setTimeout(() => {
+    ob.classList.add("hidden");
+    runBoot();
+  }, 600);
+}
+
+// Press Enter in name field
+window.addEventListener("DOMContentLoaded", () => {
+  const nameInput = document.getElementById("ob-name");
+  if (nameInput) {
+    nameInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") obContinue();
+    });
+  }
+});
 
 
 // ══════════════════════════════════════
@@ -19,14 +70,14 @@ setInterval(updateClock, 1000);
 // ══════════════════════════════════════
 
 const BOOT_MESSAGES = [
-  { text: "Initializing Matriarchs OS kernel…",       ok: true  },
-  { text: "Loading sovereign network stack…",          ok: false },
-  { text: "Mounting encrypted filesystem…",            ok: true  },
-  { text: "Starting Scramjet proxy engine…",           ok: true  },
-  { text: "Establishing BareMux transport layer…",     ok: false },
-  { text: "Calibrating Wisp relay endpoints…",         ok: true  },
-  { text: "Loading desktop environment…",              ok: true  },
-  { text: "System ready.",                             ok: true  },
+  { text: "Initializing Matriarchs OS kernel…",     ok: true  },
+  { text: "Loading sovereign network stack…",        ok: false },
+  { text: "Mounting encrypted filesystem…",          ok: true  },
+  { text: "Starting Scramjet proxy engine…",         ok: true  },
+  { text: "Establishing BareMux transport layer…",   ok: false },
+  { text: "Calibrating Wisp relay endpoints…",       ok: true  },
+  { text: "Loading desktop environment…",            ok: true  },
+  { text: "System ready.",                           ok: true  },
 ];
 
 function runBoot() {
@@ -44,6 +95,7 @@ function runBoot() {
         bootEl.classList.add("fade-out");
         deskEl.classList.remove("hidden");
         updateClock();
+        applyUsername();
       }, 650);
       return;
     }
@@ -63,14 +115,45 @@ function runBoot() {
   setTimeout(step, 800);
 }
 
-window.addEventListener("DOMContentLoaded", runBoot);
+
+// ══════════════════════════════════════
+//  USERNAME — apply to topbar + start menu
+// ══════════════════════════════════════
+
+function applyUsername() {
+  const name = localStorage.getItem("mos_username") || "";
+  const topEl = document.getElementById("topbar-user");
+  const smEl  = document.getElementById("sm-username");
+
+  if (topEl && name) topEl.textContent = name.toUpperCase();
+  if (smEl)          smEl.textContent  = name || "User";
+}
+
+
+// ══════════════════════════════════════
+//  INIT — check onboarding on load
+// ══════════════════════════════════════
+
+window.addEventListener("DOMContentLoaded", () => {
+  const hasName = localStorage.getItem("mos_username");
+
+  if (!hasName) {
+    // Show onboarding, hide boot
+    document.getElementById("boot-screen").style.display = "none";
+    document.getElementById("onboarding").classList.remove("hidden");
+  } else {
+    // Skip onboarding, run boot directly
+    document.getElementById("onboarding").classList.add("hidden");
+    runBoot();
+  }
+});
 
 
 // ══════════════════════════════════════
 //  SCRAMJET INIT
 // ══════════════════════════════════════
 
-let scramjet = null;
+let scramjet  = null;
 let connection = null;
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -97,22 +180,32 @@ window.addEventListener("DOMContentLoaded", () => {
 
 let zTop = 10;
 
+// Registry of open windows for taskbar: { id, title, iconId }
+const openWindows = {};
+
 function bringToFront(id) {
   const w = document.getElementById(id);
   if (w) w.style.zIndex = ++zTop;
+  refreshTaskbar();
 }
 
 function closeWindow(id) {
   const w = document.getElementById(id);
   if (!w) return;
-  w.style.opacity = "0";
+  w.style.opacity   = "0";
   w.style.transform = "scale(0.9)";
-  setTimeout(() => w.remove(), 200);
+  setTimeout(() => {
+    w.remove();
+    delete openWindows[id];
+    refreshTaskbar();
+  }, 200);
 }
 
 function minimizeWindow(id) {
   const w = document.getElementById(id);
-  if (w) w.classList.toggle("minimized");
+  if (!w) return;
+  w.classList.toggle("minimized");
+  refreshTaskbar();
 }
 
 function maximizeWindow(id) {
@@ -130,10 +223,11 @@ function maximizeWindow(id) {
     w.dataset.origLeft = w.style.left   || w.offsetLeft   + "px";
     w.dataset.origW    = w.style.width  || w.offsetWidth  + "px";
     w.dataset.origH    = w.style.height || w.offsetHeight + "px";
+    const tbH = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--taskbar-h")) || 44;
     w.style.top    = "32px";
     w.style.left   = "0";
     w.style.width  = "100vw";
-    w.style.height = "calc(100vh - 32px - 80px)";
+    w.style.height = `calc(100vh - 32px - ${tbH}px)`;
     w.dataset.maximized = "1";
   }
 }
@@ -160,12 +254,81 @@ function makeDraggable(win) {
     win.style.top  = (e.clientY - oy) + "px";
   });
 
-  document.addEventListener("mouseup", () => {
-    dragging = false;
-  });
+  document.addEventListener("mouseup", () => { dragging = false; });
 
   win.addEventListener("mousedown", () => bringToFront(win.id));
 }
+
+
+// ══════════════════════════════════════
+//  TASKBAR
+// ══════════════════════════════════════
+
+function refreshTaskbar() {
+  const container = document.getElementById("taskbar-apps");
+  if (!container) return;
+  container.innerHTML = "";
+
+  for (const [id, info] of Object.entries(openWindows)) {
+    const win        = document.getElementById(id);
+    const isOpen     = !!win;
+    const isMin      = win && win.classList.contains("minimized");
+    const isFocused  = win && parseInt(win.style.zIndex || 0) === zTop;
+
+    const btn = document.createElement("button");
+    btn.className = "taskbar-btn open" + (isFocused && !isMin ? " active" : "");
+    btn.title     = info.title;
+
+    btn.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24">
+        <use href="#ico-${info.iconId}"/>
+      </svg>
+      <span>${info.title}</span>
+    `;
+
+    btn.addEventListener("click", () => {
+      if (!isOpen) return;
+      if (isMin) {
+        win.classList.remove("minimized");
+        bringToFront(id);
+      } else if (isFocused) {
+        win.classList.add("minimized");
+      } else {
+        bringToFront(id);
+      }
+      refreshTaskbar();
+    });
+
+    container.appendChild(btn);
+  }
+}
+
+
+// ══════════════════════════════════════
+//  START MENU
+// ══════════════════════════════════════
+
+let startMenuOpen = false;
+
+function toggleStartMenu() {
+  const menu  = document.getElementById("start-menu");
+  const btn   = document.querySelector(".taskbar-start");
+  startMenuOpen = !startMenuOpen;
+  menu.classList.toggle("hidden", !startMenuOpen);
+  if (btn) btn.classList.toggle("active", startMenuOpen);
+}
+
+// Close start menu when clicking outside
+document.addEventListener("click", (e) => {
+  if (!startMenuOpen) return;
+  const menu = document.getElementById("start-menu");
+  const btn  = document.querySelector(".taskbar-start");
+  if (menu && !menu.contains(e.target) && btn && !btn.contains(e.target)) {
+    startMenuOpen = false;
+    menu.classList.add("hidden");
+    btn.classList.remove("active");
+  }
+});
 
 
 // ══════════════════════════════════════
@@ -187,6 +350,10 @@ function openBrowser() {
   const win = document.getElementById("win-browser");
   makeDraggable(win);
   bringToFront("win-browser");
+
+  // Register in taskbar
+  openWindows["win-browser"] = { title: "Browser", iconId: "globe" };
+  refreshTaskbar();
 
   const addrEl    = document.getElementById("sj-address");
   const engineEl  = document.getElementById("sj-search-engine");
@@ -274,4 +441,8 @@ function openAbout() {
   document.getElementById("windows").appendChild(win);
   makeDraggable(win);
   bringToFront("win-about");
+
+  // Register in taskbar
+  openWindows["win-about"] = { title: "About", iconId: "hex" };
+  refreshTaskbar();
 }
