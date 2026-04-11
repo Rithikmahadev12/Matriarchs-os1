@@ -1,66 +1,98 @@
 <!doctype html>
 <html>
-	<head>
-		<meta charset="utf-8" />
-		<meta
-			name="viewport"
-			content="width=device-width, initial-scale=1.0, shrink-to-fit=no"
-		/>
-		<title>Scramjet</title>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no" />
+    <title>Matriarchs OS</title>
+    <link rel="shortcut icon" content="favicon.webp" />
 
-		<link rel="shortcut icon" content="favicon.webp" />
-	
-		<script src="/scram/scramjet.all.js"></script>
-		<script src="/baremux/index.js"></script>
-		
-		<link rel="stylesheet" href="index.css" />
-		<script src="register-sw.js" defer></script>
-		<script src="search.js" defer></script>
-		<script src="index.js" defer></script>
-	</head>
+    <script src="/scram/scramjet.all.js"></script>
+    <script src="/baremux/index.js"></script>
 
-	<body>
-		<div title="Scramjet Logo" class="flex-center logo-wrapper header-center">
-			<img class="logo" src="sj.png" alt="Scramjet" />
-			<h1>Scramjet | MW</h1>
-		</div>
-		<div class="flex-center desc left-margin">
-			<p>
-				Scramjet is an experimental interception based web proxy designed to
-				evade internet censorship, bypass arbitrary web browser restrictions and
-				innovate web proxy technologies.
-			</p>
-		</div>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,400&family=Share+Tech+Mono&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
 
-		<form id="sj-form" class="flex-center">
-			<input
-				id="sj-search-engine"
-				value="https://www.google.com/search?q=%s"
-				type="hidden"
-			/>
-			<input id="sj-address" type="text" placeholder="Search the web freely" />
-		</form>
-		<div class="desc left-margin">
-			<p id="sj-error"></p>
-			<pre id="sj-error-code"></pre>
-		</div>
-		<footer>
-			<div>
-				<a
-					title="The Mercury Workshop GitHub organization"
-					href="https://github.com/MercuryWorkshop"
-					>Mercury Workshop</a
-				>
-				<a
-					title="The example demo app for Scramjet"
-					href="https://github.com/MercuryWorkshop/Scramjet-Demo"
-					>GitHub</a
-				>
-				<a title="License information" href="credits.html">Credits</a>
-			</div>
-			<div>
-				<span>Scramjet &copy; MW 2025</span>
-			</div>
-		</footer>
-	</body>
+    <link rel="stylesheet" href="index.css" />
+    <script src="register-sw.js" defer></script>
+    <script src="search.js" defer></script>
+    <script src="index.js" defer></script>
+  </head>
+  <body>
+
+    <!-- ═══════════════ BOOT SCREEN ═══════════════ -->
+    <div id="boot-screen">
+      <div class="boot-logo">
+        <div class="boot-sigil">⬡</div>
+        <h1 class="boot-title">MATRIARCHS<span>OS</span></h1>
+        <div class="boot-version">v1.0.0 — SOVEREIGN EDITION</div>
+      </div>
+      <div class="boot-log" id="boot-log"></div>
+      <div class="boot-bar-wrap">
+        <div class="boot-bar" id="boot-bar"></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ DESKTOP ═══════════════ -->
+    <div id="desktop" class="hidden">
+
+      <!-- TOP BAR -->
+      <div id="topbar">
+        <div class="topbar-left">
+          <span class="os-name">⬡ MATRIARCHS OS</span>
+        </div>
+        <div class="topbar-right">
+          <span id="clock"></span>
+        </div>
+      </div>
+
+      <!-- DESKTOP ICONS -->
+      <div id="desktop-icons">
+        <div class="desktop-icon" onclick="openBrowser()">
+          <div class="icon-img">🌐</div>
+          <span>Browser</span>
+        </div>
+        <div class="desktop-icon" onclick="openAbout()">
+          <div class="icon-img">⬡</div>
+          <span>About</span>
+        </div>
+      </div>
+
+      <!-- WINDOWS LAYER -->
+      <div id="windows"></div>
+
+      <!-- DOCK -->
+      <div id="dock">
+        <div class="dock-item" onclick="openBrowser()" title="Browser">🌐</div>
+        <div class="dock-item" onclick="openAbout()" title="About">⬡</div>
+      </div>
+
+    </div>
+
+    <!-- BROWSER WINDOW TEMPLATE -->
+    <template id="browser-window-tpl">
+      <div class="window" id="win-browser">
+        <div class="window-titlebar">
+          <div class="window-controls">
+            <button class="wbtn close" onclick="closeWindow('win-browser')"></button>
+            <button class="wbtn min"   onclick="minimizeWindow('win-browser')"></button>
+            <button class="wbtn max"   onclick="maximizeWindow('win-browser')"></button>
+          </div>
+          <span class="window-title">Browser</span>
+        </div>
+        <div class="window-body">
+          <div class="browser-bar">
+            <input id="sj-search-engine" value="https://www.google.com/search?q=%s" type="hidden" />
+            <input id="sj-address" type="text" placeholder="Search or enter URL…" autocomplete="off" />
+            <button id="sj-go">GO</button>
+          </div>
+          <div id="sj-error-wrap">
+            <p id="sj-error"></p>
+            <pre id="sj-error-code"></pre>
+          </div>
+          <div id="sj-frame-wrap"></div>
+        </div>
+      </div>
+    </template>
+
+  </body>
 </html>
