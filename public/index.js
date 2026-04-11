@@ -1,64 +1,265 @@
 "use strict";
-/**
- * @type {HTMLFormElement}
- */
-const form = document.getElementById("sj-form");
-/**
- * @type {HTMLInputElement}
- */
-const address = document.getElementById("sj-address");
-/**
- * @type {HTMLInputElement}
- */
-const searchEngine = document.getElementById("sj-search-engine");
-/**
- * @type {HTMLParagraphElement}
- */
-const error = document.getElementById("sj-error");
-/**
- * @type {HTMLPreElement}
- */
-const errorCode = document.getElementById("sj-error-code");
 
-const { ScramjetController } = $scramjetLoadController();
+// ══════════════════════════════════════
+//  CLOCK
+// ══════════════════════════════════════
 
-const scramjet = new ScramjetController({
-	files: {
-		wasm: "/scram/scramjet.wasm.wasm",
-		all: "/scram/scramjet.all.js",
-		sync: "/scram/scramjet.sync.js",
-	},
+function updateClock() {
+  const el = document.getElementById("clock");
+  if (!el) return;
+  const now = new Date();
+  el.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+setInterval(updateClock, 1000);
+
+
+// ══════════════════════════════════════
+//  BOOT SEQUENCE
+// ══════════════════════════════════════
+
+const BOOT_MESSAGES = [
+  { text: "Initializing Matriarchs OS kernel…",       type: "ok" },
+  { text: "Loading sovereign network stack…",          type: ""   },
+  { text: "Mounting encrypted filesystem…",            type: "ok" },
+  { text: "Starting Scramjet proxy engine…",           type: "ok" },
+  { text: "Establishing BareMux transport layer…",     type: ""   },
+  { text: "Calibrating Wisp relay endpoints…",         type: "ok" },
+  { text: "Loading desktop environment…",              type: "ok" },
+  { text: "System ready.",                             type: "ok" },
+];
+
+function runBoot() {
+  const logEl   = document.getElementById("boot-log");
+  const barEl   = document.getElementById("boot-bar");
+  const bootEl  = document.getElementById("boot-screen");
+  const deskEl  = document.getElementById("desktop");
+
+  let i = 0;
+
+  function step() {
+    if (i >= BOOT_MESSAGES.length) {
+      barEl.style.width = "100%";
+      setTimeout(() => {
+        bootEl.classList.add("fade-out");
+        deskEl.classList.remove("hidden");
+        updateClock();
+      }, 700);
+      return;
+    }
+
+    const { text, type } = BOOT_MESSAGES[i];
+    const line = document.createElement("div");
+    line.className = "log-line" + (type === "ok" ? " log-ok" : type === "warn" ? " log-warn" : "");
+    line.textContent = (type === "ok" ? "[ OK ] " : "[    ] ") + text;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+
+    barEl.style.width = ((i + 1) / BOOT_MESSAGES.length * 100) + "%";
+    i++;
+    setTimeout(step, 260 + Math.random() * 200);
+  }
+
+  setTimeout(step, 900);
+}
+
+window.addEventListener("DOMContentLoaded", runBoot);
+
+
+// ══════════════════════════════════════
+//  SCRAMJET INIT
+// ══════════════════════════════════════
+
+let scramjet = null;
+let connection = null;
+
+window.addEventListener("DOMContentLoaded", () => {
+  try {
+    const { ScramjetController } = $scramjetLoadController();
+    scramjet = new ScramjetController({
+      files: {
+        wasm: "/scram/scramjet.wasm.wasm",
+        all:  "/scram/scramjet.all.js",
+        sync: "/scram/scramjet.sync.js",
+      },
+    });
+    scramjet.init();
+    connection = new BareMux.BareMuxConnection("/baremux/worker.js");
+  } catch (e) {
+    console.warn("Scramjet init failed:", e);
+  }
 });
 
-scramjet.init();
 
-const connection = new BareMux.BareMuxConnection("/baremux/worker.js");
+// ══════════════════════════════════════
+//  WINDOW MANAGEMENT
+// ══════════════════════════════════════
 
-form.addEventListener("submit", async (event) => {
-	event.preventDefault();
+let zTop = 10;
 
-	try {
-		await registerSW();
-	} catch (err) {
-		error.textContent = "Failed to register service worker.";
-		errorCode.textContent = err.toString();
-		throw err;
-	}
+function bringToFront(id) {
+  const w = document.getElementById(id);
+  if (w) w.style.zIndex = ++zTop;
+}
 
-	const url = search(address.value, searchEngine.value);
+function closeWindow(id) {
+  const w = document.getElementById(id);
+  if (!w) return;
+  w.style.transition = "transform 0.2s ease, opacity 0.2s ease";
+  w.style.transform  = "scale(0.88)";
+  w.style.opacity    = "0";
+  setTimeout(() => w.remove(), 210);
+}
 
-	let wispUrl =
-		(location.protocol === "https:" ? "wss" : "ws") +
-		"://" +
-		location.host +
-		"/wisp/";
-	if ((await connection.getTransport()) !== "/libcurl/index.mjs") {
-		await connection.setTransport("/libcurl/index.mjs", [
-			{ websocket: wispUrl },
-		]);
-	}
-	const frame = scramjet.createFrame();
-	frame.frame.id = "sj-frame";
-	document.body.appendChild(frame.frame);
-	frame.go(url);
-});
+function minimizeWindow(id) {
+  const w = document.getElementById(id);
+  if (w) w.classList.toggle("minimized");
+}
+
+function maximizeWindow(id) {
+  const w = document.getElementById(id);
+  if (!w) return;
+  if (w.dataset.maximized) {
+    w.style.top    = w.dataset.origTop;
+    w.style.left   = w.dataset.origLeft;
+    w.style.width  = w.dataset.origW;
+    w.style.height = w.dataset.origH;
+    delete w.dataset.maximized;
+  } else {
+    w.dataset.origTop  = w.style.top  || w.offsetTop  + "px";
+    w.dataset.origLeft = w.style.left || w.offsetLeft + "px";
+    w.dataset.origW    = w.style.width  || w.offsetWidth  + "px";
+    w.dataset.origH    = w.style.height || w.offsetHeight + "px";
+    w.style.top    = "32px";
+    w.style.left   = "0";
+    w.style.width  = "100vw";
+    w.style.height = "calc(100vh - 32px - 88px)";
+    w.dataset.maximized = "1";
+  }
+}
+
+function makeDraggable(win) {
+  const bar = win.querySelector(".window-titlebar");
+  if (!bar) return;
+  let ox = 0, oy = 0, dragging = false;
+
+  bar.addEventListener("mousedown", (e) => {
+    if (e.target.classList.contains("wbtn")) return;
+    if (win.dataset.maximized) return;
+    dragging = true;
+    ox = e.clientX - win.offsetLeft;
+    oy = e.clientY - win.offsetTop;
+    bringToFront(win.id);
+    e.preventDefault();
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    win.style.left = (e.clientX - ox) + "px";
+    win.style.top  = (e.clientY - oy) + "px";
+  });
+
+  document.addEventListener("mouseup", () => { dragging = false; });
+
+  win.addEventListener("mousedown", () => bringToFront(win.id));
+}
+
+
+// ══════════════════════════════════════
+//  BROWSER WINDOW
+// ══════════════════════════════════════
+
+function openBrowser() {
+  const existing = document.getElementById("win-browser");
+  if (existing) {
+    existing.classList.remove("minimized");
+    bringToFront("win-browser");
+    return;
+  }
+
+  const tpl   = document.getElementById("browser-window-tpl");
+  const clone = tpl.content.cloneNode(true);
+  document.getElementById("windows").appendChild(clone);
+
+  const win = document.getElementById("win-browser");
+  makeDraggable(win);
+  bringToFront("win-browser");
+
+  const addrEl   = document.getElementById("sj-address");
+  const engineEl = document.getElementById("sj-search-engine");
+  const errorEl  = document.getElementById("sj-error");
+  const errCodeEl= document.getElementById("sj-error-code");
+  const frameWrap= document.getElementById("sj-frame-wrap");
+  const goBtn    = document.getElementById("sj-go");
+
+  async function navigate() {
+    errorEl.textContent  = "";
+    errCodeEl.textContent = "";
+
+    try {
+      await registerSW();
+    } catch (err) {
+      errorEl.textContent  = "Failed to register service worker.";
+      errCodeEl.textContent = err.toString();
+      return;
+    }
+
+    const url     = search(addrEl.value, engineEl.value);
+    const wispUrl = (location.protocol === "https:" ? "wss" : "ws") +
+                    "://" + location.host + "/wisp/";
+
+    if ((await connection.getTransport()) !== "/libcurl/index.mjs") {
+      await connection.setTransport("/libcurl/index.mjs", [{ websocket: wispUrl }]);
+    }
+
+    frameWrap.innerHTML = "";
+    const frame = scramjet.createFrame();
+    frameWrap.appendChild(frame.frame);
+    frame.go(url);
+  }
+
+  goBtn.addEventListener("click", navigate);
+  addrEl.addEventListener("keydown", (e) => { if (e.key === "Enter") navigate(); });
+}
+
+
+// ══════════════════════════════════════
+//  ABOUT WINDOW
+// ══════════════════════════════════════
+
+function openAbout() {
+  const existing = document.getElementById("win-about");
+  if (existing) {
+    existing.classList.remove("minimized");
+    bringToFront("win-about");
+    return;
+  }
+
+  const win = document.createElement("div");
+  win.className = "window";
+  win.id        = "win-about";
+  win.innerHTML = `
+    <div class="window-titlebar">
+      <div class="window-controls">
+        <button class="wbtn close" onclick="closeWindow('win-about')"></button>
+        <button class="wbtn min"   onclick="minimizeWindow('win-about')"></button>
+        <button class="wbtn max"   onclick="maximizeWindow('win-about')"></button>
+      </div>
+      <span class="window-title">About Matriarchs OS</span>
+    </div>
+    <div class="window-body">
+      <div class="about-body">
+        <div class="about-sigil">⬡</div>
+        <div class="about-name">Matriarchs OS</div>
+        <div class="about-sub">SOVEREIGN EDITION — v1.0.0</div>
+        <div class="about-info">
+          Built on Scramjet + BareMux<br>
+          Powered by Mercury Workshop
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("windows").appendChild(win);
+  makeDraggable(win);
+  bringToFront("win-about");
+}
