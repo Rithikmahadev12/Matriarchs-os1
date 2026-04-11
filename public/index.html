@@ -19,51 +19,105 @@
   </head>
   <body>
 
-    <!-- SVG ICON DEFS (reusable symbols) -->
+    <!-- ═══════════════ SVG ICON SYMBOLS ═══════════════ -->
     <svg width="0" height="0" style="position:absolute;overflow:hidden">
       <defs>
-        <!-- Hexagon sigil -->
         <symbol id="ico-hex" viewBox="0 0 24 24">
           <path d="M12 2L21.66 7.5V16.5L12 22L2.34 16.5V7.5Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
           <path d="M12 6L18.5 9.75V17.25L12 21L5.5 17.25V9.75Z" fill="none" stroke="currentColor" stroke-width="0.75" opacity="0.45"/>
           <circle cx="12" cy="12" r="2.5" fill="currentColor"/>
         </symbol>
-        <!-- Globe / Browser -->
         <symbol id="ico-globe" viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.5"/>
           <path d="M3 12h18M12 3C9.5 6 8 9 8 12s1.5 6 4 9M12 3c2.5 3 4 6 4 9s-1.5 6-4 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </symbol>
-        <!-- Terminal -->
         <symbol id="ico-term" viewBox="0 0 24 24">
           <rect x="2" y="4" width="20" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
           <path d="M7 9l3 3-3 3M13 15h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </symbol>
-        <!-- Files -->
         <symbol id="ico-files" viewBox="0 0 24 24">
           <path d="M5 4h9l5 5v11a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
           <path d="M14 4v5h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
           <path d="M9 13h6M9 16h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
         </symbol>
-        <!-- Settings / Cog -->
         <symbol id="ico-cog" viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
           <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" fill="none" stroke="currentColor" stroke-width="1.5"/>
         </symbol>
-        <!-- Back arrow -->
         <symbol id="ico-back" viewBox="0 0 16 16">
           <path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </symbol>
-        <!-- Forward arrow -->
         <symbol id="ico-fwd" viewBox="0 0 16 16">
           <path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </symbol>
-        <!-- Refresh -->
         <symbol id="ico-reload" viewBox="0 0 16 16">
           <path d="M13 8A5 5 0 113 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           <path d="M13 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </symbol>
+        <symbol id="ico-user" viewBox="0 0 24 24">
+          <circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </symbol>
+        <symbol id="ico-arrow-r" viewBox="0 0 24 24">
+          <path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </symbol>
+        <symbol id="ico-sun" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </symbol>
       </defs>
     </svg>
+
+    <!-- ═══════════════ ONBOARDING ═══════════════ -->
+    <div id="onboarding" class="hidden">
+      <div class="ob-card">
+
+        <div class="ob-step" id="ob-step-1">
+          <div class="ob-sigil">
+            <svg width="44" height="44" viewBox="0 0 24 24" style="color:var(--gold)">
+              <use href="#ico-hex"/>
+            </svg>
+          </div>
+          <div class="ob-welcome">Welcome to</div>
+          <div class="ob-os-title">MATRIARCHS <span>OS</span></div>
+          <div class="ob-os-sub">Sovereign Edition — v1.0.0</div>
+          <div class="ob-card-divider"></div>
+          <p class="ob-label">What should we call you?</p>
+          <div class="ob-input-wrap">
+            <svg width="15" height="15" viewBox="0 0 24 24" class="ob-input-icon"><use href="#ico-user"/></svg>
+            <input
+              id="ob-name"
+              type="text"
+              class="ob-input"
+              placeholder="Enter your name…"
+              maxlength="32"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <button class="ob-btn" id="ob-continue" onclick="obContinue()">
+            <span>Continue</span>
+            <svg width="15" height="15" viewBox="0 0 24 24"><use href="#ico-arrow-r"/></svg>
+          </button>
+        </div>
+
+        <div class="ob-step hidden" id="ob-step-2">
+          <div class="ob-sigil ob-sigil-ready">
+            <svg width="44" height="44" viewBox="0 0 24 24" style="color:var(--gold)">
+              <use href="#ico-sun"/>
+            </svg>
+          </div>
+          <div class="ob-greeting" id="ob-greeting"></div>
+          <p class="ob-hint">Your sovereign desktop is ready.</p>
+          <div class="ob-card-divider"></div>
+          <button class="ob-btn ob-btn-enter" onclick="obFinish()">
+            <span>Enter Matriarchs OS</span>
+            <svg width="15" height="15" viewBox="0 0 24 24"><use href="#ico-arrow-r"/></svg>
+          </button>
+        </div>
+
+      </div>
+    </div>
 
     <!-- ═══════════════ BOOT SCREEN ═══════════════ -->
     <div id="boot-screen">
@@ -98,6 +152,8 @@
           <span class="bar-menu">Help</span>
         </div>
         <div class="topbar-right">
+          <span id="topbar-user"></span>
+          <div class="bar-sep"></div>
           <span id="clock"></span>
         </div>
       </div>
@@ -133,28 +189,51 @@
       <!-- WINDOWS LAYER -->
       <div id="windows"></div>
 
-      <!-- DOCK -->
-      <div id="dock">
-        <div class="dock-item" onclick="openBrowser()">
-          <svg width="22" height="22" viewBox="0 0 24 24"><use href="#ico-globe"/></svg>
-          <span class="dock-tooltip">Browser</span>
+      <!-- TASKBAR (bottom) -->
+      <div id="taskbar">
+        <button class="taskbar-start" onclick="toggleStartMenu()" title="Start">
+          <svg width="16" height="16" viewBox="0 0 24 24" style="color:var(--gold)">
+            <use href="#ico-hex"/>
+          </svg>
+        </button>
+        <div class="taskbar-sep"></div>
+        <!-- Pinned + open app buttons injected here by JS -->
+        <div id="taskbar-apps"></div>
+        <div class="taskbar-spacer"></div>
+        <div class="taskbar-tray">
+          <svg width="13" height="13" viewBox="0 0 24 24" style="color:var(--text-dim)"><use href="#ico-cog"/></svg>
         </div>
-        <div class="dock-item" onclick="openAbout()">
-          <svg width="22" height="22" viewBox="0 0 24 24"><use href="#ico-hex"/></svg>
-          <span class="dock-tooltip">About</span>
+        <div id="taskbar-clock"></div>
+      </div>
+
+      <!-- START MENU (pops up above taskbar) -->
+      <div id="start-menu" class="hidden">
+        <div class="sm-header">
+          <svg width="13" height="13" viewBox="0 0 24 24" style="color:var(--gold)"><use href="#ico-hex"/></svg>
+          <span id="sm-username"></span>
         </div>
-        <div class="dock-item">
-          <svg width="22" height="22" viewBox="0 0 24 24"><use href="#ico-files"/></svg>
-          <span class="dock-tooltip">Files</span>
-        </div>
-        <div class="dock-item">
-          <svg width="22" height="22" viewBox="0 0 24 24"><use href="#ico-term"/></svg>
-          <span class="dock-tooltip">Terminal</span>
-        </div>
-        <div class="dock-sep"></div>
-        <div class="dock-item">
-          <svg width="22" height="22" viewBox="0 0 24 24"><use href="#ico-cog"/></svg>
-          <span class="dock-tooltip">Settings</span>
+        <div class="sm-divider"></div>
+        <div class="sm-grid">
+          <div class="sm-app" onclick="openBrowser();toggleStartMenu()">
+            <div class="sm-app-icon"><svg width="20" height="20" viewBox="0 0 24 24"><use href="#ico-globe"/></svg></div>
+            <span>Browser</span>
+          </div>
+          <div class="sm-app" onclick="openAbout();toggleStartMenu()">
+            <div class="sm-app-icon"><svg width="20" height="20" viewBox="0 0 24 24"><use href="#ico-hex"/></svg></div>
+            <span>About</span>
+          </div>
+          <div class="sm-app">
+            <div class="sm-app-icon"><svg width="20" height="20" viewBox="0 0 24 24"><use href="#ico-files"/></svg></div>
+            <span>Files</span>
+          </div>
+          <div class="sm-app">
+            <div class="sm-app-icon"><svg width="20" height="20" viewBox="0 0 24 24"><use href="#ico-term"/></svg></div>
+            <span>Terminal</span>
+          </div>
+          <div class="sm-app">
+            <div class="sm-app-icon"><svg width="20" height="20" viewBox="0 0 24 24"><use href="#ico-cog"/></svg></div>
+            <span>Settings</span>
+          </div>
         </div>
       </div>
 
