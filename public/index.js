@@ -1,11 +1,22 @@
 "use strict";
 
 // ══════════════════════════════════════
-//  CLOCK  (both topbar + taskbar)
+//  CONSTANTS
+// ══════════════════════════════════════
+
+const OWNER_USERNAME = "Jay";
+const OWNER_PASSWORD = "messi2be";
+const USERS_KEY      = "mos_users";      // array of { username, password, banned }
+const SESSION_KEY    = "mos_session";    // currently logged-in username
+const KICKED_KEY     = "mos_kicked";     // set of kicked usernames (cleared on login)
+
+
+// ══════════════════════════════════════
+//  CLOCK
 // ══════════════════════════════════════
 
 function updateClock() {
-  const now = new Date();
+  const now  = new Date();
   const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const date = now.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 
@@ -20,29 +31,215 @@ setInterval(updateClock, 1000);
 
 
 // ══════════════════════════════════════
-//  ONBOARDING
+//  USER STORAGE HELPERS
 // ══════════════════════════════════════
 
-function obContinue() {
-  const input = document.getElementById("ob-name");
-  const name  = input.value.trim();
-  if (!name) {
-    input.style.borderColor = "rgba(255,80,80,0.5)";
-    input.focus();
-    setTimeout(() => { input.style.borderColor = ""; }, 1200);
+function getUsers() {
+  try { return JSON.parse(localStorage.getItem(USERS_KEY)) || []; }
+  catch { return []; }
+}
+
+function saveUsers(users) {
+  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+}
+
+function getSession() {
+  return localStorage.getItem(SESSION_KEY) || null;
+}
+
+function setSession(username) {
+  localStorage.setItem(SESSION_KEY, username);
+}
+
+function clearSession() {
+  localStorage.removeItem(SESSION_KEY);
+}
+
+function isOwner(username) {
+  return username === OWNER_USERNAME;
+}
+
+function findUser(username) {
+  return getUsers().find(u => u.username.toLowerCase() === username.toLowerCase());
+}
+
+function isUserBanned(username) {
+  const u = findUser(username);
+  return u ? !!u.banned : false;
+}
+
+function isUserKicked(username) {
+  try {
+    const kicked = JSON.parse(localStorage.getItem(KICKED_KEY)) || [];
+    return kicked.includes(username);
+  } catch { return false; }
+}
+
+function markKicked(username) {
+  try {
+    const kicked = JSON.parse(localStorage.getItem(KICKED_KEY)) || [];
+    if (!kicked.includes(username)) kicked.push(username);
+    localStorage.setItem(KICKED_KEY, JSON.stringify(kicked));
+  } catch {}
+}
+
+function clearKicked(username) {
+  try {
+    let kicked = JSON.parse(localStorage.getItem(KICKED_KEY)) || [];
+    kicked = kicked.filter(u => u !== username);
+    localStorage.setItem(KICKED_KEY, JSON.stringify(kicked));
+  } catch {}
+}
+
+
+// ══════════════════════════════════════
+//  AUTH SCREEN
+// ══════════════════════════════════════
+
+function switchAuthTab(tab) {
+  const loginForm  = document.getElementById("auth-login-form");
+  const signupForm = document.getElementById("auth-signup-form");
+  const tabLogin   = document.getElementById("tab-login");
+  const tabSignup  = document.getElementById("tab-signup");
+
+  if (tab === "login") {
+    loginForm.style.display  = "flex";
+    signupForm.style.display = "none";
+    tabLogin.classList.add("active");
+    tabSignup.classList.remove("active");
+    clearMsg("login-msg");
+  } else {
+    loginForm.style.display  = "none";
+    signupForm.style.display = "flex";
+    tabLogin.classList.remove("active");
+    tabSignup.classList.add("active");
+    clearMsg("signup-msg");
+  }
+}
+
+function setMsg(id, text, isError = true) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.className   = "auth-msg " + (isError ? "error" : "ok");
+}
+
+function clearMsg(id) {
+  const el = document.getElementById(id);
+  if (el) { el.textContent = ""; el.className = "auth-msg"; }
+}
+
+function shakeInput(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add("error");
+  setTimeout(() => el.classList.remove("error"), 600);
+}
+
+function doLogin() {
+  const username = document.getElementById("login-username").value.trim();
+  const password = document.getElementById("login-password").value;
+
+  if (!username) { shakeInput("login-username"); setMsg("login-msg", "Enter your username."); return; }
+  if (!password) { shakeInput("login-password"); setMsg("login-msg", "Enter your password."); return; }
+
+  // Owner login
+  if (username === OWNER_USERNAME) {
+    if (password !== OWNER_PASSWORD) {
+      shakeInput("login-password");
+      setMsg("login-msg", "Invalid credentials.");
+      return;
+    }
+    clearKicked(OWNER_USERNAME);
+    setSession(OWNER_USERNAME);
+    proceedAfterAuth(OWNER_USERNAME);
     return;
   }
 
-  // Save name
-  localStorage.setItem("mos_username", name);
+  // Regular user
+  const user = findUser(username);
+  if (!user) { shakeInput("login-username"); setMsg("login-msg", "Account not found. Create one?"); return; }
+  if (user.password !== password) { shakeInput("login-password"); setMsg("login-msg", "Wrong password."); return; }
+  if (user.banned) { setMsg("login-msg", "This account has been banned."); return; }
 
-  // Transition to step 2
+  clearKicked(username);
+  setSession(username);
+  proceedAfterAuth(username);
+}
+
+function doSignup() {
+  const username = document.getElementById("signup-username").value.trim();
+  const password = document.getElementById("signup-password").value;
+  const confirm  = document.getElementById("signup-confirm").value;
+
+  if (!username) { shakeInput("signup-username"); setMsg("signup-msg", "Choose a username."); return; }
+  if (username.length < 2) { shakeInput("signup-username"); setMsg("signup-msg", "Username must be at least 2 characters."); return; }
+  if (/[^a-zA-Z0-9_\-]/.test(username)) { shakeInput("signup-username"); setMsg("signup-msg", "Letters, numbers, _ and - only."); return; }
+  if (username === OWNER_USERNAME) { shakeInput("signup-username"); setMsg("signup-msg", "That username is reserved."); return; }
+  if (!password) { shakeInput("signup-password"); setMsg("signup-msg", "Choose a password."); return; }
+  if (password.length < 4) { shakeInput("signup-password"); setMsg("signup-msg", "Password must be at least 4 characters."); return; }
+  if (password !== confirm) { shakeInput("signup-confirm"); setMsg("signup-msg", "Passwords don't match."); return; }
+
+  const users = getUsers();
+  if (users.find(u => u.username.toLowerCase() === username.toLowerCase())) {
+    shakeInput("signup-username");
+    setMsg("signup-msg", "Username already taken.");
+    return;
+  }
+
+  users.push({ username, password, banned: false, createdAt: Date.now() });
+  saveUsers(users);
+  setSession(username);
+  setMsg("signup-msg", "Account created!", false);
+  setTimeout(() => proceedAfterAuth(username), 600);
+}
+
+function doGuest() {
+  const guest = "Guest_" + Math.floor(Math.random() * 9000 + 1000);
+  setSession(guest);
+  proceedAfterAuth(guest);
+}
+
+function doLogout() {
+  clearSession();
+  location.reload();
+}
+
+function proceedAfterAuth(username) {
+  // Hide auth screen
+  const auth = document.getElementById("auth-screen");
+  auth.classList.add("hidden");
+
+  // Check if returning user (has visited before)
+  const visitKey = "mos_visited_" + username;
+  const hasVisited = localStorage.getItem(visitKey);
+
+  if (!hasVisited) {
+    localStorage.setItem(visitKey, "1");
+    showOnboarding(username);
+  } else {
+    runBoot();
+  }
+}
+
+
+// ══════════════════════════════════════
+//  ONBOARDING
+// ══════════════════════════════════════
+
+function showOnboarding(username) {
+  const ob = document.getElementById("onboarding");
+  ob.classList.remove("hidden");
+
+  const greeting = document.getElementById("ob-greeting");
+  if (greeting) {
+    greeting.innerHTML = "Welcome, <span>" + username + "</span>";
+  }
+
+  // Show step 2 directly since we have username from auth
   document.getElementById("ob-step-1").classList.add("hidden");
   const step2 = document.getElementById("ob-step-2");
   step2.classList.remove("hidden");
-
-  document.getElementById("ob-greeting").innerHTML =
-    "Hello, <span>" + name + "</span>";
 }
 
 function obFinish() {
@@ -53,16 +250,6 @@ function obFinish() {
     runBoot();
   }, 600);
 }
-
-// Press Enter in name field
-window.addEventListener("DOMContentLoaded", () => {
-  const nameInput = document.getElementById("ob-name");
-  if (nameInput) {
-    nameInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") obContinue();
-    });
-  }
-});
 
 
 // ══════════════════════════════════════
@@ -81,10 +268,14 @@ const BOOT_MESSAGES = [
 ];
 
 function runBoot() {
+  const bootEl = document.getElementById("boot-screen");
   const logEl  = document.getElementById("boot-log");
   const barEl  = document.getElementById("boot-bar");
-  const bootEl = document.getElementById("boot-screen");
   const deskEl = document.getElementById("desktop");
+
+  bootEl.style.display = "flex";
+  bootEl.style.opacity = "1";
+  logEl.innerHTML      = "";
 
   let i = 0;
 
@@ -95,14 +286,14 @@ function runBoot() {
         bootEl.classList.add("fade-out");
         deskEl.classList.remove("hidden");
         updateClock();
-        applyUsername();
+        applyDesktopUI();
       }, 650);
       return;
     }
 
     const { text, ok } = BOOT_MESSAGES[i];
     const line = document.createElement("div");
-    line.className = "log-line" + (ok ? " log-ok" : "");
+    line.className  = "log-line" + (ok ? " log-ok" : "");
     line.textContent = (ok ? "[ OK ] " : "[    ] ") + text;
     logEl.appendChild(line);
     logEl.scrollTop = logEl.scrollHeight;
@@ -112,40 +303,274 @@ function runBoot() {
     setTimeout(step, 240 + Math.random() * 180);
   }
 
-  setTimeout(step, 800);
+  setTimeout(step, 600);
 }
 
 
 // ══════════════════════════════════════
-//  USERNAME — apply to topbar + start menu
+//  DESKTOP UI — apply username + owner perks
 // ══════════════════════════════════════
 
-function applyUsername() {
-  const name = localStorage.getItem("mos_username") || "";
+function applyDesktopUI() {
+  const username = getSession() || "Guest";
+  const owner    = isOwner(username);
+
+  // Topbar username
   const topEl = document.getElementById("topbar-user");
-  const smEl  = document.getElementById("sm-username");
+  if (topEl) {
+    topEl.textContent = username.toUpperCase();
+    if (owner) topEl.classList.add("is-owner");
+  }
 
-  if (topEl && name) topEl.textContent = name.toUpperCase();
-  if (smEl)          smEl.textContent  = name || "User";
+  // Start menu username
+  const smEl = document.getElementById("sm-username");
+  if (smEl) {
+    smEl.textContent = username;
+    if (owner) smEl.classList.add("is-owner");
+  }
+
+  // Owner extras
+  if (owner) {
+    injectOwnerUI();
+  }
+}
+
+function injectOwnerUI() {
+  // Topbar admin menu item
+  const topbarLeft = document.querySelector(".topbar-left");
+  if (topbarLeft && !document.getElementById("topbar-admin-btn")) {
+    const adminMenu = document.createElement("span");
+    adminMenu.className = "bar-menu owner-menu";
+    adminMenu.id        = "topbar-admin-btn";
+    adminMenu.textContent = "⬡ Admin";
+    adminMenu.onclick = () => openAdmin();
+    topbarLeft.appendChild(adminMenu);
+  }
+
+  // Desktop admin icon
+  const desktopIcons = document.getElementById("desktop-icons");
+  if (desktopIcons && !document.getElementById("icon-admin")) {
+    const adminIcon = document.createElement("div");
+    adminIcon.className = "desktop-icon owner-icon";
+    adminIcon.id        = "icon-admin";
+    adminIcon.onclick   = openAdmin;
+    adminIcon.innerHTML = `
+      <div class="icon-img">
+        <svg width="32" height="32" viewBox="0 0 24 24"><use href="#ico-shield"/></svg>
+      </div>
+      <span>Admin</span>
+    `;
+    desktopIcons.appendChild(adminIcon);
+  }
+
+  // Start menu admin app
+  const smGrid = document.getElementById("sm-grid");
+  if (smGrid && !document.getElementById("sm-admin-app")) {
+    const adminApp = document.createElement("div");
+    adminApp.className = "sm-app owner-app";
+    adminApp.id        = "sm-admin-app";
+    adminApp.onclick   = () => { openAdmin(); toggleStartMenu(); };
+    adminApp.innerHTML = `
+      <div class="sm-app-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24"><use href="#ico-shield"/></svg>
+      </div>
+      <span>Admin Panel</span>
+    `;
+    smGrid.appendChild(adminApp);
+  }
 }
 
 
 // ══════════════════════════════════════
-//  INIT — check onboarding on load
+//  ADMIN PANEL
+// ══════════════════════════════════════
+
+function openAdmin() {
+  const existing = document.getElementById("win-admin");
+  if (existing) {
+    existing.classList.remove("minimized");
+    bringToFront("win-admin");
+    return;
+  }
+
+  const win = document.createElement("div");
+  win.className = "window";
+  win.id        = "win-admin";
+
+  win.innerHTML = `
+    <div class="window-titlebar">
+      <div class="window-controls">
+        <button class="wbtn close" onclick="closeWindow('win-admin')"></button>
+        <button class="wbtn min"   onclick="minimizeWindow('win-admin')"></button>
+        <button class="wbtn max"   onclick="maximizeWindow('win-admin')"></button>
+      </div>
+      <span class="window-title">ADMIN PANEL</span>
+    </div>
+    <div class="window-body">
+      <div class="admin-body">
+        <div class="admin-header">
+          <div class="admin-title">⬡ OWNER CONTROL PANEL</div>
+          <div class="admin-sub">Logged in as Jay — Sovereign Access</div>
+        </div>
+        <div class="admin-stats" id="admin-stats"></div>
+        <div class="admin-section-title">Registered Users</div>
+        <div class="admin-users-list" id="admin-users-list"></div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("windows").appendChild(win);
+  makeDraggable(win);
+  bringToFront("win-admin");
+
+  openWindows["win-admin"] = { title: "Admin", iconId: "shield" };
+  refreshTaskbar();
+  renderAdminPanel();
+}
+
+function renderAdminPanel() {
+  const users     = getUsers();
+  const statsEl   = document.getElementById("admin-stats");
+  const listEl    = document.getElementById("admin-users-list");
+  if (!statsEl || !listEl) return;
+
+  const total   = users.length;
+  const banned  = users.filter(u => u.banned).length;
+  const active  = total - banned;
+
+  statsEl.innerHTML = `
+    <div class="admin-stat">
+      <div class="admin-stat-num">${total}</div>
+      <div class="admin-stat-label">TOTAL USERS</div>
+    </div>
+    <div class="admin-stat">
+      <div class="admin-stat-num">${active}</div>
+      <div class="admin-stat-label">ACTIVE</div>
+    </div>
+    <div class="admin-stat">
+      <div class="admin-stat-num">${banned}</div>
+      <div class="admin-stat-label">BANNED</div>
+    </div>
+  `;
+
+  if (users.length === 0) {
+    listEl.innerHTML = `<div class="admin-empty">No registered accounts yet.</div>`;
+    return;
+  }
+
+  listEl.innerHTML = users.map((user, idx) => {
+    const initials = user.username.slice(0, 2).toUpperCase();
+    const isBanned = user.banned;
+    const statusText  = isBanned ? "Banned" : "Active";
+    const statusClass = isBanned ? "banned" : "online";
+
+    return `
+      <div class="admin-user-row" id="admin-row-${idx}">
+        <div class="admin-user-avatar">${initials}</div>
+        <div class="admin-user-info">
+          <div class="admin-user-name">${escHtml(user.username)}</div>
+          <div class="admin-user-status ${statusClass}">${statusText}</div>
+        </div>
+        <div class="admin-actions">
+          ${isBanned
+            ? `<button class="admin-action-btn unban-btn" onclick="adminUnban('${escHtml(user.username)}')">UNBAN</button>`
+            : `<button class="admin-action-btn ban-btn" onclick="adminBan('${escHtml(user.username)}')">BAN</button>`
+          }
+          <button class="admin-action-btn kick-btn" onclick="adminKick('${escHtml(user.username)}')"${isBanned ? " disabled" : ""}>KICK</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function adminBan(username) {
+  const users = getUsers();
+  const user  = users.find(u => u.username === username);
+  if (!user) return;
+  user.banned = true;
+  saveUsers(users);
+  showToast(`${username} has been banned.`);
+  renderAdminPanel();
+}
+
+function adminUnban(username) {
+  const users = getUsers();
+  const user  = users.find(u => u.username === username);
+  if (!user) return;
+  user.banned = false;
+  saveUsers(users);
+  showToast(`${username} has been unbanned.`);
+  renderAdminPanel();
+}
+
+function adminKick(username) {
+  markKicked(username);
+  showToast(`${username} has been kicked. They'll be forced out on next login.`);
+  renderAdminPanel();
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+function showToast(msg) {
+  const toast = document.createElement("div");
+  toast.className   = "kick-toast";
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add("fade-out");
+    setTimeout(() => toast.remove(), 350);
+  }, 2800);
+}
+
+
+// ══════════════════════════════════════
+//  INIT
 // ══════════════════════════════════════
 
 window.addEventListener("DOMContentLoaded", () => {
-  const hasName = localStorage.getItem("mos_username");
+  const session = getSession();
 
-  if (!hasName) {
-    // Show onboarding, hide boot
-    document.getElementById("boot-screen").style.display = "none";
-    document.getElementById("onboarding").classList.remove("hidden");
-  } else {
-    // Skip onboarding, run boot directly
-    document.getElementById("onboarding").classList.add("hidden");
-    runBoot();
+  // If kicked, force re-auth
+  if (session && isUserKicked(session)) {
+    clearSession();
+    location.reload();
+    return;
   }
+
+  // If banned, force re-auth
+  if (session && session !== OWNER_USERNAME && isUserBanned(session)) {
+    clearSession();
+    location.reload();
+    return;
+  }
+
+  if (session) {
+    // Already logged in — check if first visit
+    const visitKey   = "mos_visited_" + session;
+    const hasVisited = localStorage.getItem(visitKey);
+    if (!hasVisited) {
+      localStorage.setItem(visitKey, "1");
+      document.getElementById("auth-screen").classList.add("hidden");
+      showOnboarding(session);
+    } else {
+      document.getElementById("auth-screen").classList.add("hidden");
+      runBoot();
+    }
+  }
+  // else: auth screen is shown by default
+
+  // Keydown helpers for auth inputs
+  document.getElementById("login-password")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") doLogin();
+  });
+  document.getElementById("login-username")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") doLogin();
+  });
+  document.getElementById("signup-confirm")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") doSignup();
+  });
 });
 
 
@@ -179,8 +604,6 @@ window.addEventListener("DOMContentLoaded", () => {
 // ══════════════════════════════════════
 
 let zTop = 10;
-
-// Registry of open windows for taskbar: { id, title, iconId }
 const openWindows = {};
 
 function bringToFront(id) {
@@ -255,7 +678,6 @@ function makeDraggable(win) {
   });
 
   document.addEventListener("mouseup", () => { dragging = false; });
-
   win.addEventListener("mousedown", () => bringToFront(win.id));
 }
 
@@ -270,10 +692,10 @@ function refreshTaskbar() {
   container.innerHTML = "";
 
   for (const [id, info] of Object.entries(openWindows)) {
-    const win        = document.getElementById(id);
-    const isOpen     = !!win;
-    const isMin      = win && win.classList.contains("minimized");
-    const isFocused  = win && parseInt(win.style.zIndex || 0) === zTop;
+    const win       = document.getElementById(id);
+    const isOpen    = !!win;
+    const isMin     = win && win.classList.contains("minimized");
+    const isFocused = win && parseInt(win.style.zIndex || 0) === zTop;
 
     const btn = document.createElement("button");
     btn.className = "taskbar-btn open" + (isFocused && !isMin ? " active" : "");
@@ -311,14 +733,13 @@ function refreshTaskbar() {
 let startMenuOpen = false;
 
 function toggleStartMenu() {
-  const menu  = document.getElementById("start-menu");
-  const btn   = document.querySelector(".taskbar-start");
+  const menu = document.getElementById("start-menu");
+  const btn  = document.querySelector(".taskbar-start");
   startMenuOpen = !startMenuOpen;
   menu.classList.toggle("hidden", !startMenuOpen);
   if (btn) btn.classList.toggle("active", startMenuOpen);
 }
 
-// Close start menu when clicking outside
 document.addEventListener("click", (e) => {
   if (!startMenuOpen) return;
   const menu = document.getElementById("start-menu");
@@ -351,7 +772,6 @@ function openBrowser() {
   makeDraggable(win);
   bringToFront("win-browser");
 
-  // Register in taskbar
   openWindows["win-browser"] = { title: "Browser", iconId: "globe" };
   refreshTaskbar();
 
@@ -442,7 +862,6 @@ function openAbout() {
   makeDraggable(win);
   bringToFront("win-about");
 
-  // Register in taskbar
   openWindows["win-about"] = { title: "About", iconId: "hex" };
   refreshTaskbar();
 }
