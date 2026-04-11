@@ -10,6 +10,7 @@ function updateClock() {
   const now = new Date();
   el.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
+
 setInterval(updateClock, 1000);
 
 
@@ -18,21 +19,21 @@ setInterval(updateClock, 1000);
 // ══════════════════════════════════════
 
 const BOOT_MESSAGES = [
-  { text: "Initializing Matriarchs OS kernel…",       type: "ok" },
-  { text: "Loading sovereign network stack…",          type: ""   },
-  { text: "Mounting encrypted filesystem…",            type: "ok" },
-  { text: "Starting Scramjet proxy engine…",           type: "ok" },
-  { text: "Establishing BareMux transport layer…",     type: ""   },
-  { text: "Calibrating Wisp relay endpoints…",         type: "ok" },
-  { text: "Loading desktop environment…",              type: "ok" },
-  { text: "System ready.",                             type: "ok" },
+  { text: "Initializing Matriarchs OS kernel…",       ok: true  },
+  { text: "Loading sovereign network stack…",          ok: false },
+  { text: "Mounting encrypted filesystem…",            ok: true  },
+  { text: "Starting Scramjet proxy engine…",           ok: true  },
+  { text: "Establishing BareMux transport layer…",     ok: false },
+  { text: "Calibrating Wisp relay endpoints…",         ok: true  },
+  { text: "Loading desktop environment…",              ok: true  },
+  { text: "System ready.",                             ok: true  },
 ];
 
 function runBoot() {
-  const logEl   = document.getElementById("boot-log");
-  const barEl   = document.getElementById("boot-bar");
-  const bootEl  = document.getElementById("boot-screen");
-  const deskEl  = document.getElementById("desktop");
+  const logEl  = document.getElementById("boot-log");
+  const barEl  = document.getElementById("boot-bar");
+  const bootEl = document.getElementById("boot-screen");
+  const deskEl = document.getElementById("desktop");
 
   let i = 0;
 
@@ -43,23 +44,23 @@ function runBoot() {
         bootEl.classList.add("fade-out");
         deskEl.classList.remove("hidden");
         updateClock();
-      }, 700);
+      }, 650);
       return;
     }
 
-    const { text, type } = BOOT_MESSAGES[i];
+    const { text, ok } = BOOT_MESSAGES[i];
     const line = document.createElement("div");
-    line.className = "log-line" + (type === "ok" ? " log-ok" : type === "warn" ? " log-warn" : "");
-    line.textContent = (type === "ok" ? "[ OK ] " : "[    ] ") + text;
+    line.className = "log-line" + (ok ? " log-ok" : "");
+    line.textContent = (ok ? "[ OK ] " : "[    ] ") + text;
     logEl.appendChild(line);
     logEl.scrollTop = logEl.scrollHeight;
 
     barEl.style.width = ((i + 1) / BOOT_MESSAGES.length * 100) + "%";
     i++;
-    setTimeout(step, 260 + Math.random() * 200);
+    setTimeout(step, 240 + Math.random() * 180);
   }
 
-  setTimeout(step, 900);
+  setTimeout(step, 800);
 }
 
 window.addEventListener("DOMContentLoaded", runBoot);
@@ -104,10 +105,9 @@ function bringToFront(id) {
 function closeWindow(id) {
   const w = document.getElementById(id);
   if (!w) return;
-  w.style.transition = "transform 0.2s ease, opacity 0.2s ease";
-  w.style.transform  = "scale(0.88)";
-  w.style.opacity    = "0";
-  setTimeout(() => w.remove(), 210);
+  w.style.opacity = "0";
+  w.style.transform = "scale(0.9)";
+  setTimeout(() => w.remove(), 200);
 }
 
 function minimizeWindow(id) {
@@ -118,6 +118,7 @@ function minimizeWindow(id) {
 function maximizeWindow(id) {
   const w = document.getElementById(id);
   if (!w) return;
+
   if (w.dataset.maximized) {
     w.style.top    = w.dataset.origTop;
     w.style.left   = w.dataset.origLeft;
@@ -125,14 +126,14 @@ function maximizeWindow(id) {
     w.style.height = w.dataset.origH;
     delete w.dataset.maximized;
   } else {
-    w.dataset.origTop  = w.style.top  || w.offsetTop  + "px";
-    w.dataset.origLeft = w.style.left || w.offsetLeft + "px";
+    w.dataset.origTop  = w.style.top    || w.offsetTop    + "px";
+    w.dataset.origLeft = w.style.left   || w.offsetLeft   + "px";
     w.dataset.origW    = w.style.width  || w.offsetWidth  + "px";
     w.dataset.origH    = w.style.height || w.offsetHeight + "px";
     w.style.top    = "32px";
     w.style.left   = "0";
     w.style.width  = "100vw";
-    w.style.height = "calc(100vh - 32px - 88px)";
+    w.style.height = "calc(100vh - 32px - 80px)";
     w.dataset.maximized = "1";
   }
 }
@@ -140,6 +141,7 @@ function maximizeWindow(id) {
 function makeDraggable(win) {
   const bar = win.querySelector(".window-titlebar");
   if (!bar) return;
+
   let ox = 0, oy = 0, dragging = false;
 
   bar.addEventListener("mousedown", (e) => {
@@ -158,7 +160,9 @@ function makeDraggable(win) {
     win.style.top  = (e.clientY - oy) + "px";
   });
 
-  document.addEventListener("mouseup", () => { dragging = false; });
+  document.addEventListener("mouseup", () => {
+    dragging = false;
+  });
 
   win.addEventListener("mousedown", () => bringToFront(win.id));
 }
@@ -184,21 +188,21 @@ function openBrowser() {
   makeDraggable(win);
   bringToFront("win-browser");
 
-  const addrEl   = document.getElementById("sj-address");
-  const engineEl = document.getElementById("sj-search-engine");
-  const errorEl  = document.getElementById("sj-error");
-  const errCodeEl= document.getElementById("sj-error-code");
-  const frameWrap= document.getElementById("sj-frame-wrap");
-  const goBtn    = document.getElementById("sj-go");
+  const addrEl    = document.getElementById("sj-address");
+  const engineEl  = document.getElementById("sj-search-engine");
+  const errorEl   = document.getElementById("sj-error");
+  const errCodeEl = document.getElementById("sj-error-code");
+  const frameWrap = document.getElementById("sj-frame-wrap");
+  const goBtn     = document.getElementById("sj-go");
 
   async function navigate() {
-    errorEl.textContent  = "";
+    errorEl.textContent   = "";
     errCodeEl.textContent = "";
 
     try {
       await registerSW();
     } catch (err) {
-      errorEl.textContent  = "Failed to register service worker.";
+      errorEl.textContent   = "Failed to register service worker.";
       errCodeEl.textContent = err.toString();
       return;
     }
@@ -218,7 +222,9 @@ function openBrowser() {
   }
 
   goBtn.addEventListener("click", navigate);
-  addrEl.addEventListener("keydown", (e) => { if (e.key === "Enter") navigate(); });
+  addrEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") navigate();
+  });
 }
 
 
@@ -237,6 +243,7 @@ function openAbout() {
   const win = document.createElement("div");
   win.className = "window";
   win.id        = "win-about";
+
   win.innerHTML = `
     <div class="window-titlebar">
       <div class="window-controls">
@@ -244,16 +251,21 @@ function openAbout() {
         <button class="wbtn min"   onclick="minimizeWindow('win-about')"></button>
         <button class="wbtn max"   onclick="maximizeWindow('win-about')"></button>
       </div>
-      <span class="window-title">About Matriarchs OS</span>
+      <span class="window-title">ABOUT</span>
     </div>
     <div class="window-body">
       <div class="about-body">
-        <div class="about-sigil">⬡</div>
-        <div class="about-name">Matriarchs OS</div>
+        <div class="about-sigil">
+          <svg width="40" height="40" viewBox="0 0 24 24">
+            <use href="#ico-hex"/>
+          </svg>
+        </div>
+        <div class="about-name">MATRIARCHS OS</div>
         <div class="about-sub">SOVEREIGN EDITION — v1.0.0</div>
+        <div class="about-divider"></div>
         <div class="about-info">
-          Built on Scramjet + BareMux<br>
-          Powered by Mercury Workshop
+          Scramjet + BareMux<br>
+          Mercury Workshop
         </div>
       </div>
     </div>
