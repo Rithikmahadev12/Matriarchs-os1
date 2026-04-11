@@ -6,9 +6,9 @@
 
 const OWNER_USERNAME = "Jay";
 const OWNER_PASSWORD = "messi2be";
-const USERS_KEY      = "mos_users";      // array of { username, password, banned }
-const SESSION_KEY    = "mos_session";    // currently logged-in username
-const KICKED_KEY     = "mos_kicked";     // set of kicked usernames (cleared on login)
+const USERS_KEY      = "mos_users";
+const SESSION_KEY    = "mos_session";
+const KICKED_KEY     = "mos_kicked";
 
 
 // ══════════════════════════════════════
@@ -206,12 +206,10 @@ function doLogout() {
 }
 
 function proceedAfterAuth(username) {
-  // Hide auth screen
   const auth = document.getElementById("auth-screen");
   auth.classList.add("hidden");
 
-  // Check if returning user (has visited before)
-  const visitKey = "mos_visited_" + username;
+  const visitKey   = "mos_visited_" + username;
   const hasVisited = localStorage.getItem(visitKey);
 
   if (!hasVisited) {
@@ -236,7 +234,6 @@ function showOnboarding(username) {
     greeting.innerHTML = "Welcome, <span>" + username + "</span>";
   }
 
-  // Show step 2 directly since we have username from auth
   document.getElementById("ob-step-1").classList.add("hidden");
   const step2 = document.getElementById("ob-step-2");
   step2.classList.remove("hidden");
@@ -275,7 +272,8 @@ function runBoot() {
 
   bootEl.style.display = "flex";
   bootEl.style.opacity = "1";
-  logEl.innerHTML      = "";
+  bootEl.classList.remove("fade-out");
+  logEl.innerHTML = "";
 
   let i = 0;
 
@@ -284,6 +282,10 @@ function runBoot() {
       barEl.style.width = "100%";
       setTimeout(() => {
         bootEl.classList.add("fade-out");
+        // After CSS transition finishes, fully hide the boot screen
+        setTimeout(() => {
+          bootEl.style.display = "none";
+        }, 850);
         deskEl.classList.remove("hidden");
         updateClock();
         applyDesktopUI();
@@ -293,7 +295,7 @@ function runBoot() {
 
     const { text, ok } = BOOT_MESSAGES[i];
     const line = document.createElement("div");
-    line.className  = "log-line" + (ok ? " log-ok" : "");
+    line.className   = "log-line" + (ok ? " log-ok" : "");
     line.textContent = (ok ? "[ OK ] " : "[    ] ") + text;
     logEl.appendChild(line);
     logEl.scrollTop = logEl.scrollHeight;
@@ -308,46 +310,41 @@ function runBoot() {
 
 
 // ══════════════════════════════════════
-//  DESKTOP UI — apply username + owner perks
+//  DESKTOP UI
 // ══════════════════════════════════════
 
 function applyDesktopUI() {
   const username = getSession() || "Guest";
   const owner    = isOwner(username);
 
-  // Topbar username
   const topEl = document.getElementById("topbar-user");
   if (topEl) {
     topEl.textContent = username.toUpperCase();
     if (owner) topEl.classList.add("is-owner");
   }
 
-  // Start menu username
   const smEl = document.getElementById("sm-username");
   if (smEl) {
     smEl.textContent = username;
     if (owner) smEl.classList.add("is-owner");
   }
 
-  // Owner extras
   if (owner) {
     injectOwnerUI();
   }
 }
 
 function injectOwnerUI() {
-  // Topbar admin menu item
   const topbarLeft = document.querySelector(".topbar-left");
   if (topbarLeft && !document.getElementById("topbar-admin-btn")) {
     const adminMenu = document.createElement("span");
-    adminMenu.className = "bar-menu owner-menu";
-    adminMenu.id        = "topbar-admin-btn";
+    adminMenu.className   = "bar-menu owner-menu";
+    adminMenu.id          = "topbar-admin-btn";
     adminMenu.textContent = "⬡ Admin";
-    adminMenu.onclick = () => openAdmin();
+    adminMenu.onclick     = () => openAdmin();
     topbarLeft.appendChild(adminMenu);
   }
 
-  // Desktop admin icon
   const desktopIcons = document.getElementById("desktop-icons");
   if (desktopIcons && !document.getElementById("icon-admin")) {
     const adminIcon = document.createElement("div");
@@ -363,7 +360,6 @@ function injectOwnerUI() {
     desktopIcons.appendChild(adminIcon);
   }
 
-  // Start menu admin app
   const smGrid = document.getElementById("sm-grid");
   if (smGrid && !document.getElementById("sm-admin-app")) {
     const adminApp = document.createElement("div");
@@ -429,14 +425,14 @@ function openAdmin() {
 }
 
 function renderAdminPanel() {
-  const users     = getUsers();
-  const statsEl   = document.getElementById("admin-stats");
-  const listEl    = document.getElementById("admin-users-list");
+  const users   = getUsers();
+  const statsEl = document.getElementById("admin-stats");
+  const listEl  = document.getElementById("admin-users-list");
   if (!statsEl || !listEl) return;
 
-  const total   = users.length;
-  const banned  = users.filter(u => u.banned).length;
-  const active  = total - banned;
+  const total  = users.length;
+  const banned = users.filter(u => u.banned).length;
+  const active = total - banned;
 
   statsEl.innerHTML = `
     <div class="admin-stat">
@@ -458,14 +454,14 @@ function renderAdminPanel() {
     return;
   }
 
-  listEl.innerHTML = users.map((user, idx) => {
-    const initials = user.username.slice(0, 2).toUpperCase();
-    const isBanned = user.banned;
+  listEl.innerHTML = users.map((user) => {
+    const initials    = user.username.slice(0, 2).toUpperCase();
+    const isBanned    = user.banned;
     const statusText  = isBanned ? "Banned" : "Active";
     const statusClass = isBanned ? "banned" : "online";
 
     return `
-      <div class="admin-user-row" id="admin-row-${idx}">
+      <div class="admin-user-row">
         <div class="admin-user-avatar">${initials}</div>
         <div class="admin-user-info">
           <div class="admin-user-name">${escHtml(user.username)}</div>
@@ -474,7 +470,7 @@ function renderAdminPanel() {
         <div class="admin-actions">
           ${isBanned
             ? `<button class="admin-action-btn unban-btn" onclick="adminUnban('${escHtml(user.username)}')">UNBAN</button>`
-            : `<button class="admin-action-btn ban-btn" onclick="adminBan('${escHtml(user.username)}')">BAN</button>`
+            : `<button class="admin-action-btn ban-btn"   onclick="adminBan('${escHtml(user.username)}')">BAN</button>`
           }
           <button class="admin-action-btn kick-btn" onclick="adminKick('${escHtml(user.username)}')"${isBanned ? " disabled" : ""}>KICK</button>
         </div>
@@ -505,12 +501,16 @@ function adminUnban(username) {
 
 function adminKick(username) {
   markKicked(username);
-  showToast(`${username} has been kicked. They'll be forced out on next login.`);
+  showToast(`${username} has been kicked. They'll be forced out on next session check.`);
   renderAdminPanel();
 }
 
 function escHtml(str) {
-  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function showToast(msg) {
@@ -532,14 +532,12 @@ function showToast(msg) {
 window.addEventListener("DOMContentLoaded", () => {
   const session = getSession();
 
-  // If kicked, force re-auth
   if (session && isUserKicked(session)) {
     clearSession();
     location.reload();
     return;
   }
 
-  // If banned, force re-auth
   if (session && session !== OWNER_USERNAME && isUserBanned(session)) {
     clearSession();
     location.reload();
@@ -547,7 +545,6 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   if (session) {
-    // Already logged in — check if first visit
     const visitKey   = "mos_visited_" + session;
     const hasVisited = localStorage.getItem(visitKey);
     if (!hasVisited) {
@@ -559,9 +556,7 @@ window.addEventListener("DOMContentLoaded", () => {
       runBoot();
     }
   }
-  // else: auth screen is shown by default
 
-  // Keydown helpers for auth inputs
   document.getElementById("login-password")?.addEventListener("keydown", e => {
     if (e.key === "Enter") doLogin();
   });
@@ -578,7 +573,7 @@ window.addEventListener("DOMContentLoaded", () => {
 //  SCRAMJET INIT
 // ══════════════════════════════════════
 
-let scramjet  = null;
+let scramjet   = null;
 let connection = null;
 
 window.addEventListener("DOMContentLoaded", () => {
