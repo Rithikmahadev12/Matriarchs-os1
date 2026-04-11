@@ -65,8 +65,82 @@
           <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
           <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </symbol>
+        <symbol id="ico-lock" viewBox="0 0 24 24">
+          <rect x="5" y="11" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M8 11V7a4 4 0 018 0v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="12" cy="16" r="1.5" fill="currentColor"/>
+        </symbol>
+        <symbol id="ico-shield" viewBox="0 0 24 24">
+          <path d="M12 2L4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M8 12l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </symbol>
       </defs>
     </svg>
+
+    <!-- ═══════════════ AUTH SCREEN ═══════════════ -->
+    <div id="auth-screen">
+      <div class="auth-card">
+
+        <div class="auth-logo">
+          <svg width="40" height="40" viewBox="0 0 24 24" style="color:var(--gold)">
+            <use href="#ico-hex"/>
+          </svg>
+        </div>
+        <div class="auth-os-name">MATRIARCHS <span>OS</span></div>
+        <div class="auth-os-sub">SOVEREIGN EDITION — v1.0.0</div>
+
+        <div class="auth-divider"></div>
+
+        <!-- Tab switcher -->
+        <div class="auth-tabs">
+          <button class="auth-tab active" id="tab-login" onclick="switchAuthTab('login')">LOGIN</button>
+          <button class="auth-tab" id="tab-signup" onclick="switchAuthTab('signup')">CREATE ACCOUNT</button>
+        </div>
+
+        <!-- Login form -->
+        <div class="auth-form" id="auth-login-form">
+          <div class="auth-field">
+            <svg width="15" height="15" viewBox="0 0 24 24" class="auth-field-icon"><use href="#ico-user"/></svg>
+            <input id="login-username" class="auth-input" type="text" placeholder="Username…" autocomplete="off" spellcheck="false" maxlength="32"/>
+          </div>
+          <div class="auth-field">
+            <svg width="15" height="15" viewBox="0 0 24 24" class="auth-field-icon"><use href="#ico-lock"/></svg>
+            <input id="login-password" class="auth-input" type="password" placeholder="Password…" autocomplete="off" maxlength="64"/>
+          </div>
+          <div class="auth-msg" id="login-msg"></div>
+          <button class="auth-btn" onclick="doLogin()">
+            <span>LOGIN</span>
+            <svg width="14" height="14" viewBox="0 0 24 24"><use href="#ico-arrow-r"/></svg>
+          </button>
+        </div>
+
+        <!-- Signup form -->
+        <div class="auth-form" id="auth-signup-form" style="display:none">
+          <div class="auth-field">
+            <svg width="15" height="15" viewBox="0 0 24 24" class="auth-field-icon"><use href="#ico-user"/></svg>
+            <input id="signup-username" class="auth-input" type="text" placeholder="Choose a username…" autocomplete="off" spellcheck="false" maxlength="32"/>
+          </div>
+          <div class="auth-field">
+            <svg width="15" height="15" viewBox="0 0 24 24" class="auth-field-icon"><use href="#ico-lock"/></svg>
+            <input id="signup-password" class="auth-input" type="password" placeholder="Choose a password…" autocomplete="off" maxlength="64"/>
+          </div>
+          <div class="auth-field">
+            <svg width="15" height="15" viewBox="0 0 24 24" class="auth-field-icon"><use href="#ico-lock"/></svg>
+            <input id="signup-confirm" class="auth-input" type="password" placeholder="Confirm password…" autocomplete="off" maxlength="64"/>
+          </div>
+          <div class="auth-msg" id="signup-msg"></div>
+          <button class="auth-btn" onclick="doSignup()">
+            <span>CREATE ACCOUNT</span>
+            <svg width="14" height="14" viewBox="0 0 24 24"><use href="#ico-arrow-r"/></svg>
+          </button>
+        </div>
+
+        <p class="auth-guest">
+          Or continue as <span onclick="doGuest()">Guest</span>
+        </p>
+
+      </div>
+    </div>
 
     <!-- ═══════════════ ONBOARDING ═══════════════ -->
     <div id="onboarding" class="hidden">
@@ -82,21 +156,9 @@
           <div class="ob-os-title">MATRIARCHS <span>OS</span></div>
           <div class="ob-os-sub">Sovereign Edition — v1.0.0</div>
           <div class="ob-card-divider"></div>
-          <p class="ob-label">What should we call you?</p>
-          <div class="ob-input-wrap">
-            <svg width="15" height="15" viewBox="0 0 24 24" class="ob-input-icon"><use href="#ico-user"/></svg>
-            <input
-              id="ob-name"
-              type="text"
-              class="ob-input"
-              placeholder="Enter your name…"
-              maxlength="32"
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </div>
-          <button class="ob-btn" id="ob-continue" onclick="obContinue()">
-            <span>Continue</span>
+          <p class="ob-label">Your account is ready. Let's get started.</p>
+          <button class="ob-btn" onclick="obFinish()">
+            <span>Enter Matriarchs OS</span>
             <svg width="15" height="15" viewBox="0 0 24 24"><use href="#ico-arrow-r"/></svg>
           </button>
         </div>
@@ -120,7 +182,7 @@
     </div>
 
     <!-- ═══════════════ BOOT SCREEN ═══════════════ -->
-    <div id="boot-screen">
+    <div id="boot-screen" style="display:none">
       <div class="boot-sigil">
         <svg width="56" height="56" viewBox="0 0 24 24">
           <use href="#ico-hex"/>
@@ -150,9 +212,12 @@
           <span class="bar-menu" onclick="openBrowser()">Browser</span>
           <span class="bar-menu" onclick="openAbout()">About</span>
           <span class="bar-menu">Help</span>
+          <!-- Owner-only menu item injected by JS -->
         </div>
         <div class="topbar-right">
           <span id="topbar-user"></span>
+          <div class="bar-sep"></div>
+          <span id="topbar-logout" onclick="doLogout()">LOGOUT</span>
           <div class="bar-sep"></div>
           <span id="clock"></span>
         </div>
@@ -184,6 +249,7 @@
           </div>
           <span>Terminal</span>
         </div>
+        <!-- Admin icon injected by JS for owner -->
       </div>
 
       <!-- WINDOWS LAYER -->
@@ -197,7 +263,6 @@
           </svg>
         </button>
         <div class="taskbar-sep"></div>
-        <!-- Pinned + open app buttons injected here by JS -->
         <div id="taskbar-apps"></div>
         <div class="taskbar-spacer"></div>
         <div class="taskbar-tray">
@@ -206,14 +271,14 @@
         <div id="taskbar-clock"></div>
       </div>
 
-      <!-- START MENU (pops up above taskbar) -->
+      <!-- START MENU -->
       <div id="start-menu" class="hidden">
         <div class="sm-header">
           <svg width="13" height="13" viewBox="0 0 24 24" style="color:var(--gold)"><use href="#ico-hex"/></svg>
           <span id="sm-username"></span>
         </div>
         <div class="sm-divider"></div>
-        <div class="sm-grid">
+        <div class="sm-grid" id="sm-grid">
           <div class="sm-app" onclick="openBrowser();toggleStartMenu()">
             <div class="sm-app-icon"><svg width="20" height="20" viewBox="0 0 24 24"><use href="#ico-globe"/></svg></div>
             <span>Browser</span>
@@ -234,6 +299,7 @@
             <div class="sm-app-icon"><svg width="20" height="20" viewBox="0 0 24 24"><use href="#ico-cog"/></svg></div>
             <span>Settings</span>
           </div>
+          <!-- Owner app injected by JS -->
         </div>
       </div>
 
