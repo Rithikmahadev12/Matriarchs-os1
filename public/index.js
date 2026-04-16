@@ -326,7 +326,6 @@ function applyDesktopUI() {
     if (owner) smEl.classList.add("is-owner");
   }
 
-  // Wire up desktop icons that were missing onclick handlers
   wireDesktopIcons();
 
   if (owner) {
@@ -334,9 +333,7 @@ function applyDesktopUI() {
   }
 }
 
-// ── FIX: attach onclick to static desktop icons & start menu entries ──
 function wireDesktopIcons() {
-  // Desktop icons
   const desktopIcons = document.querySelectorAll("#desktop-icons .desktop-icon");
   desktopIcons.forEach(icon => {
     const label = icon.querySelector("span")?.textContent?.trim();
@@ -345,7 +342,6 @@ function wireDesktopIcons() {
     if (label === "Calculator" && !icon.dataset.wired) { icon.onclick = openCalculator; icon.dataset.wired = "1"; }
   });
 
-  // Start menu apps
   const smApps = document.querySelectorAll("#sm-grid .sm-app");
   smApps.forEach(app => {
     const label = app.querySelector("span")?.textContent?.trim();
@@ -400,11 +396,10 @@ function injectOwnerUI() {
 
 
 // ══════════════════════════════════════
-//  ADMIN PANEL  (FIXED)
+//  ADMIN PANEL
 // ══════════════════════════════════════
 
 function openAdmin() {
-  // Only the owner can open this
   const session = getSession();
   if (!isOwner(session)) return;
 
@@ -451,7 +446,6 @@ function openAdmin() {
 }
 
 function renderAdminPanel() {
-  // ── FIX: re-read users fresh every render ──
   const users   = getUsers();
   const statsEl = document.getElementById("admin-stats");
   const listEl  = document.getElementById("admin-users-list");
@@ -615,7 +609,6 @@ function openFiles() {
       <span class="window-title">FILES</span>
     </div>
     <div class="window-body" style="flex-direction:row;overflow:hidden">
-      <!-- Sidebar -->
       <div class="files-sidebar">
         <div class="files-sidebar-section">LOCATIONS</div>
         <div class="files-sidebar-item active" id="files-loc-home">
@@ -628,7 +621,6 @@ function openFiles() {
           <span>New File</span>
         </div>
       </div>
-      <!-- Main content -->
       <div class="files-main">
         <div class="files-toolbar">
           <span class="files-path">~/Home</span>
@@ -639,7 +631,6 @@ function openFiles() {
       </div>
     </div>
 
-    <!-- Editor panel (hidden by default) -->
     <div class="files-editor" id="files-editor" style="display:none">
       <div class="files-editor-bar">
         <span class="files-editor-name" id="files-editor-name">Untitled</span>
@@ -849,7 +840,6 @@ function openCalculator() {
   openWindows["win-calc"] = { title: "Calculator", iconId: "cog" };
   refreshTaskbar();
 
-  // Keyboard support
   win._calcKeyHandler = (e) => {
     if (!document.getElementById("win-calc")) return;
     const k = e.key;
@@ -954,7 +944,7 @@ function calcBackspace() {
 
 
 // ══════════════════════════════════════
-//  TERMINAL (stub)
+//  TERMINAL
 // ══════════════════════════════════════
 
 function openTerminal() {
@@ -1026,7 +1016,6 @@ function openTerminal() {
     input.value = "";
     if (!raw) return;
 
-    // Print the command
     const cmdLine = document.createElement("div");
     cmdLine.className = "term-line";
     cmdLine.innerHTML = `<span class="term-prompt">${escHtml(username)}@mos</span> <span style="color:var(--text-dim)">$</span> <span style="color:var(--text)">${escHtml(raw)}</span>`;
@@ -1062,7 +1051,7 @@ function openTerminal() {
 
 
 // ══════════════════════════════════════
-//  SETTINGS (stub)
+//  SETTINGS
 // ══════════════════════════════════════
 
 function openSettings() {
@@ -1115,11 +1104,27 @@ window.addEventListener("DOMContentLoaded", () => {
 
 
 // ══════════════════════════════════════
-//  SCRAMJET INIT
+//  SCRAMJET INIT  ← FIXED
 // ══════════════════════════════════════
 
 let scramjet   = null;
 let connection = null;
+
+// ── FIX 1: registerSW was called but never defined ──
+async function registerSW() {
+  if (!navigator.serviceWorker) {
+    throw new Error("Service workers are not supported in this browser.");
+  }
+
+  // If already registered and active, reuse it
+  const existing = await navigator.serviceWorker.getRegistration("/");
+  if (existing && existing.active) return existing;
+
+  // Register fresh
+  const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+  await navigator.serviceWorker.ready;
+  return reg;
+}
 
 window.addEventListener("DOMContentLoaded", () => {
   try {
@@ -1131,7 +1136,10 @@ window.addEventListener("DOMContentLoaded", () => {
         sync: "/scram/scramjet.sync.js",
       },
     });
-    scramjet.init();
+
+    // ── FIX 2: pass "/sw.js" so Scramjet registers at the correct scope ──
+    scramjet.init("/sw.js");
+
     connection = new BareMux.BareMuxConnection("/baremux/worker.js");
   } catch (e) {
     console.warn("Scramjet init failed:", e);
@@ -1155,7 +1163,6 @@ function bringToFront(id) {
 function closeWindow(id) {
   const w = document.getElementById(id);
   if (!w) return;
-  // Clean up calc keyboard listener
   if (w._calcKeyHandler) document.removeEventListener("keydown", w._calcKeyHandler);
   w.style.opacity   = "0";
   w.style.transform = "scale(0.9)";
@@ -1328,6 +1335,7 @@ function openBrowser() {
     errorEl.textContent   = "";
     errCodeEl.textContent = "";
 
+    // ── FIX 3: registerSW is now defined above and called correctly ──
     try {
       await registerSW();
     } catch (err) {
