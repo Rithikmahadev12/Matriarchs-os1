@@ -1104,27 +1104,14 @@ window.addEventListener("DOMContentLoaded", () => {
 
 
 // ══════════════════════════════════════
-//  SCRAMJET INIT  ← FIXED
+//  SCRAMJET INIT
+// ══════════════════════════════════════
+//  NOTE: registerSW is defined in register-sw.js (loaded before this file).
+//  Do NOT redefine it here — that was causing the SW registration to break.
 // ══════════════════════════════════════
 
 let scramjet   = null;
 let connection = null;
-
-// ── FIX 1: registerSW was called but never defined ──
-async function registerSW() {
-  if (!navigator.serviceWorker) {
-    throw new Error("Service workers are not supported in this browser.");
-  }
-
-  // If already registered and active, reuse it
-  const existing = await navigator.serviceWorker.getRegistration("/");
-  if (existing && existing.active) return existing;
-
-  // Register fresh
-  const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-  await navigator.serviceWorker.ready;
-  return reg;
-}
 
 window.addEventListener("DOMContentLoaded", () => {
   try {
@@ -1137,7 +1124,6 @@ window.addEventListener("DOMContentLoaded", () => {
       },
     });
 
-    // ── FIX 2: pass "/sw.js" so Scramjet registers at the correct scope ──
     scramjet.init("/sw.js");
 
     connection = new BareMux.BareMuxConnection("/baremux/worker.js");
@@ -1335,7 +1321,6 @@ function openBrowser() {
     errorEl.textContent   = "";
     errCodeEl.textContent = "";
 
-    // ── FIX 3: registerSW is now defined above and called correctly ──
     try {
       await registerSW();
     } catch (err) {
