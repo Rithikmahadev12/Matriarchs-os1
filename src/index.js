@@ -236,10 +236,22 @@ fastify.get("/proxy/", async (request, reply) => {
     const ct      = res.headers.get("content-type") || "";
     const finalUrl = res.url || targetUrl.toString();
 
-    // If response isn't HTML, show a helpful error instead of dumping raw content
-    if (!isHtml(ct)) {
+    // If clearly NOT HTML (JS, CSS, binary) — show error instead of dumping raw
+    // But if content-type is empty or unknown, try treating as HTML anyway
+    const clearlyNotHtml = ct && !isHtml(ct) && (
+      ct.includes("javascript") ||
+      ct.includes("text/css") ||
+      ct.includes("application/json") ||
+      ct.includes("image/") ||
+      ct.includes("font/") ||
+      ct.includes("audio/") ||
+      ct.includes("video/") ||
+      ct.includes("application/octet-stream")
+    );
+
+    if (clearlyNotHtml) {
       return reply.code(200).type("text/html").send(errorPage(
-        `The server returned "${ct}" instead of HTML. This site may block proxies or require login.`,
+        `This site returned "${ct}" instead of HTML and may block proxies.`,
         finalUrl
       ));
     }
