@@ -136,6 +136,40 @@ function injectionScript(origin, base) {
   }
   window.__proxyOrigin=${JSON.stringify(origin)};
   window.__proxyBase=${JSON.stringify(base)};
+
+  // ── Intercept ALL link clicks (catches JS-driven links in search engines) ──
+  document.addEventListener('click', function(e) {
+    var el = e.target;
+    while (el && el.tagName !== 'A') el = el.parentElement;
+    if (!el || !el.href) return;
+    var href = el.href;
+    if (!href || href.startsWith('#') || href.startsWith('javascript:') ||
+        href.startsWith('mailto:') || href.startsWith('blob:') ||
+        href.indexOf('/proxy/') !== -1) return;
+    try {
+      var u = new URL(href);
+      if (u.origin === window.location.origin) return;
+      e.preventDefault();
+      e.stopPropagation();
+      window.location.href = '/proxy/?url=' + encodeURIComponent(u.toString());
+    } catch(err) {}
+  }, true);
+
+  // ── Intercept window.open ──
+  var _wopen = window.open;
+  window.open = function(url, target, features) {
+    if (url && !url.startsWith('/proxy/') && !url.startsWith('#') && !url.startsWith('javascript:')) {
+      try {
+        var u = new URL(url, window.__proxyBase);
+        if (u.origin !== window.location.origin) {
+          url = '/proxy/?url=' + encodeURIComponent(u.toString());
+        }
+      } catch(e) {}
+    }
+    return _wopen ? _wopen.call(this, url, target, features) : null;
+  };
+
+  // ── Intercept fetch ──
   var _f=window.fetch;
   window.fetch=function(input,init){
     try{
@@ -147,6 +181,8 @@ function injectionScript(origin, base) {
     }catch(e){}
     return _f(input,init);
   };
+
+  // ── Intercept XHR ──
   var _open=XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open=function(method,url){
     try{
@@ -156,6 +192,13 @@ function injectionScript(origin, base) {
       }
     }catch(e){}
     return _open.apply(this,arguments);
+  };
+
+  // ── Tell parent frame our URL when history changes ──
+  var _push = history.pushState;
+  history.pushState = function(state, title, url) {
+    _push.apply(this, arguments);
+    try { window.parent.postMessage({type:'mos-nav',url:new URL(url||'',window.__proxyBase).toString()},'*'); } catch(e){}
   };
 })();
 </script>`;
