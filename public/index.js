@@ -764,7 +764,7 @@ const SEARCH_ENGINES = {
   startpage: { label: "Startpage",  url: "https://www.startpage.com/search?q=%s" },
 };
 
-let currentEngine = localStorage.getItem("mos_engine") || "brave";
+let currentEngine = localStorage.getItem("mos_engine") || "ddg";
 function getSearchUrl(q) {
   const e = SEARCH_ENGINES[currentEngine] || SEARCH_ENGINES.brave;
   return e.url.replace("%s", encodeURIComponent(q));
@@ -825,25 +825,20 @@ function openBrowser() {
 
   function navigate(rawUrl, force=false) {
     if (!rawUrl||!rawUrl.trim()) return;
-    if(errorEl) errorEl.textContent="";
-    if(errCodeEl) errCodeEl.textContent="";
+    try { if(errorEl) errorEl.textContent=""; } catch(e){}
+    try { if(errCodeEl) errCodeEl.textContent=""; } catch(e){}
     let url=rawUrl.trim();
     if (!url.startsWith("http://")&&!url.startsWith("https://")) {
       url=(url.includes(" ")||!url.includes(".")) ? getSearchUrl(url) : "https://"+url;
     }
     const proxyUrl="/proxy/?url="+encodeURIComponent(url);
-    const existing=frameWrap.querySelector("iframe");
-    if (existing && !force) {
-      existing.src=proxyUrl;
-    } else {
-      // Force: tear down and recreate iframe so it definitely navigates
-      frameWrap.innerHTML="";
-      const iframe=document.createElement("iframe");
-      iframe.style.cssText="width:100%;height:100%;border:none;background:#fff";
-      iframe.sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
-      iframe.src=proxyUrl;
-      frameWrap.appendChild(iframe);
-    }
+    // Always tear down and recreate iframe — most reliable approach
+    frameWrap.innerHTML="";
+    const iframe=document.createElement("iframe");
+    iframe.style.cssText="width:100%;height:100%;border:none;background:#fff";
+    iframe.sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
+    iframe.src=proxyUrl;
+    frameWrap.appendChild(iframe);
     addrEl.value=url;
     navHistory=navHistory.slice(0,navIdx+1);
     navHistory.push(url);
