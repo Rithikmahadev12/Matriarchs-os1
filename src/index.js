@@ -134,78 +134,70 @@ function rewriteHtml(html, pageUrl) {
 function injectionScript(origin, base) {
   return `<script>
 (function(){
+  // Register SW — handles CSS/JS/image/XHR interception automatically
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('/sw.js',{scope:'/proxy/'}).catch(function(){});
+    navigator.serviceWorker.register('/sw.js',{scope:'/proxy/'})
+      .then(function(reg){
+        if(reg.installing){
+          reg.installing.addEventListener('statechange',function(e){
+            if(e.target.state==='activated') location.reload();
+          });
+        }
+      }).catch(function(){});
   }
   window.__proxyOrigin=${JSON.stringify(origin)};
   window.__proxyBase=${JSON.stringify(base)};
 
-  // ── Intercept ALL link clicks (catches JS-driven links in search engines) ──
-  document.addEventListener('click', function(e) {
-    var el = e.target;
-    while (el && el.tagName !== 'A') el = el.parentElement;
-    if (!el || !el.href) return;
-    var href = el.href;
-    if (!href || href.startsWith('#') || href.startsWith('javascript:') ||
-        href.startsWith('mailto:') || href.startsWith('blob:') ||
-        href.indexOf('/proxy/') !== -1) return;
-    try {
-      var u = new URL(href);
-      if (u.origin === window.location.origin) return;
-      e.preventDefault();
-      e.stopPropagation();
-      window.location.href = '/proxy/?url=' + encodeURIComponent(u.toString());
-    } catch(err) {}
-  }, true);
+  // Click interceptor — catches JS-driven link navigation
+  document.addEventListener('click',function(e){
+    var el=e.target;
+    while(el&&el.tagName!=='A')el=el.parentElement;
+    if(!el||!el.href)return;
+    var href=el.href;
+    if(!href||href.startsWith('#')||href.startsWith('javascript:')||
+       href.startsWith('mailto:')||href.startsWith('blob:')||
+       href.indexOf('/proxy/')!==-1)return;
+    try{
+      var u=new URL(href);
+      if(u.origin===window.location.origin)return;
+      e.preventDefault();e.stopPropagation();
+      window.location.href='/proxy/?url='+encodeURIComponent(u.toString());
+    }catch(err){}
+  },true);
 
-  // ── Intercept window.open ──
-  var _wopen = window.open;
-  window.open = function(url, target, features) {
-    if (url && !url.startsWith('/proxy/') && !url.startsWith('#') && !url.startsWith('javascript:')) {
-      try {
-        var u = new URL(url, window.__proxyBase);
-        if (u.origin !== window.location.origin) {
-          url = '/proxy/?url=' + encodeURIComponent(u.toString());
-        }
-      } catch(e) {}
+  // window.open interceptor
+  var _wo=window.open;
+  window.open=function(url,t,f){
+    if(url&&!url.startsWith('/proxy/')&&!url.startsWith('#')&&!url.startsWith('javascript:')){
+      try{var u=new URL(url,window.__proxyBase);if(u.origin!==window.location.origin)url='/proxy/?url='+encodeURIComponent(u.toString());}catch(e){}
     }
-    return _wopen ? _wopen.call(this, url, target, features) : null;
+    return _wo?_wo.call(this,url,t,f):null;
   };
 
-  // ── Intercept fetch ──
+  // fetch/XHR backup interceptors (SW handles most, these catch edge cases)
   var _f=window.fetch;
   window.fetch=function(input,init){
     try{
       var url=typeof input==='string'?input:(input instanceof Request?input.url:String(input));
       var abs=new URL(url,window.__proxyBase).toString();
-      if(abs.indexOf(location.origin)!==0){
-        return _f('/proxy/fetch?url='+encodeURIComponent(abs),init);
-      }
+      if(abs.indexOf(location.origin)!==0)return _f('/proxy/fetch?url='+encodeURIComponent(abs),init);
     }catch(e){}
     return _f(input,init);
   };
-
-  // ── Intercept XHR ──
-  var _open=XMLHttpRequest.prototype.open;
+  var _xo=XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open=function(method,url){
-    try{
-      var abs=new URL(String(url),window.__proxyBase).toString();
-      if(abs.indexOf(location.origin)!==0){
-        arguments[1]='/proxy/fetch?url='+encodeURIComponent(abs);
-      }
-    }catch(e){}
-    return _open.apply(this,arguments);
+    try{var abs=new URL(String(url),window.__proxyBase).toString();if(abs.indexOf(location.origin)!==0)arguments[1]='/proxy/fetch?url='+encodeURIComponent(abs);}catch(e){}
+    return _xo.apply(this,arguments);
   };
 
-  // ── Tell parent frame our URL when history changes ──
-  var _push = history.pushState;
-  history.pushState = function(state, title, url) {
-    _push.apply(this, arguments);
-    try { window.parent.postMessage({type:'mos-nav',url:new URL(url||'',window.__proxyBase).toString()},'*'); } catch(e){}
+  // Notify parent frame of URL changes
+  var _pp=history.pushState;
+  history.pushState=function(s,t,url){
+    _pp.apply(this,arguments);
+    try{window.parent.postMessage({type:'mos-nav',url:new URL(url||'',window.__proxyBase).toString()},'*');}catch(e){}
   };
 })();
-</script>`;
-}
+</script>`;}
 
 function errorPage(msg, url) {
   return `<!DOCTYPE html><html><head><title>Proxy Error</title>
