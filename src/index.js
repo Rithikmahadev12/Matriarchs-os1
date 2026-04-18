@@ -55,7 +55,10 @@ async function proxyFetch(url, accept) {
 }
 
 function isHtml(ct) { return ct && (ct.includes("text/html") || ct.includes("application/xhtml")); }
-function isCss(ct)  { return ct && ct.includes("text/css"); }
+function isCss(ct, url)  { 
+  return (ct && ct.includes("text/css")) || 
+         (url && /\.css(\?|$)/i.test(url)); 
+}
 
 function toProxyPage(url, pageUrl) {
   if (!url) return url;
@@ -306,7 +309,7 @@ fastify.get("/proxy/fetch", async (request, reply) => {
     reply.header("cross-origin-resource-policy", "cross-origin");
 
     // CSS — rewrite url() references
-    if (isCss(ct)) {
+    if (isCss(ct, targetUrl.toString())) {
       const css = await res.text();
       return reply.send(rewriteCss(css, targetUrl.toString()));
     }
