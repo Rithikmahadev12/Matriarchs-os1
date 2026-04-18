@@ -231,16 +231,14 @@ fastify.get("/proxy/", async (request, reply) => {
     );
 
     const ct      = res.headers.get("content-type") || "";
-    const finalUrl = res.url || targetUrl.toString(); // follow redirects
+    const finalUrl = res.url || targetUrl.toString();
 
-    // If response isn't HTML, send it as a resource instead
+    // If response isn't HTML, show a helpful error instead of dumping raw content
     if (!isHtml(ct)) {
-      reply.header("content-type", ct || "application/octet-stream");
-      reply.header("access-control-allow-origin", "*");
-      reply.removeHeader("x-frame-options");
-      reply.removeHeader("content-security-policy");
-      const buf = await res.arrayBuffer();
-      return reply.send(Buffer.from(buf));
+      return reply.code(200).type("text/html").send(errorPage(
+        `The server returned "${ct}" instead of HTML. This site may block proxies or require login.`,
+        finalUrl
+      ));
     }
 
     let html = await res.text();
