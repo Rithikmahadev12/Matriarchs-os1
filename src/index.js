@@ -213,6 +213,8 @@ fastify.get("/proxy/", async (request, reply) => {
 
     reply.removeHeader("x-frame-options");
     reply.removeHeader("content-security-policy");
+    reply.removeHeader("content-encoding");
+    reply.removeHeader("transfer-encoding");
     reply.header("content-type", "text/html; charset=utf-8");
     return reply.send(html);
 
@@ -253,6 +255,10 @@ fastify.get("/proxy/fetch", async (request, reply) => {
 
     reply.removeHeader("x-frame-options");
     reply.removeHeader("content-security-policy");
+    // CRITICAL: Node fetch auto-decompresses, so strip encoding headers
+    // or the browser will try to decompress already-decompressed data
+    reply.removeHeader("content-encoding");
+    reply.removeHeader("transfer-encoding");
     reply.header("content-type", ct);
     reply.header("access-control-allow-origin", "*");
     reply.header("access-control-allow-headers", "*");
