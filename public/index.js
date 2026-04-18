@@ -143,7 +143,6 @@ function doLogin() {
   if (!username) { shakeInput("login-username"); setMsg("login-msg", "Enter your username."); return; }
   if (!password) { shakeInput("login-password"); setMsg("login-msg", "Enter your password."); return; }
 
-  // Owner login
   if (username === OWNER_USERNAME) {
     if (password !== OWNER_PASSWORD) {
       shakeInput("login-password");
@@ -156,7 +155,6 @@ function doLogin() {
     return;
   }
 
-  // Regular user
   const user = findUser(username);
   if (!user) { shakeInput("login-username"); setMsg("login-msg", "Account not found. Create one?"); return; }
   if (user.password !== password) { shakeInput("login-password"); setMsg("login-msg", "Wrong password."); return; }
@@ -257,9 +255,9 @@ const BOOT_MESSAGES = [
   { text: "Initializing Matriarchs OS kernel…",     ok: true  },
   { text: "Loading sovereign network stack…",        ok: false },
   { text: "Mounting encrypted filesystem…",          ok: true  },
-  { text: "Starting Scramjet proxy engine…",         ok: true  },
-  { text: "Establishing BareMux transport layer…",   ok: false },
-  { text: "Calibrating Wisp relay endpoints…",       ok: true  },
+  { text: "Starting proxy engine…",                  ok: true  },
+  { text: "Establishing transport layer…",           ok: true  },
+  { text: "Calibrating relay endpoints…",            ok: true  },
   { text: "Loading desktop environment…",            ok: true  },
   { text: "System ready.",                           ok: true  },
 ];
@@ -577,9 +575,9 @@ function saveFiles(files) {
 
 function getDefaultFiles() {
   return [
-    { id: "1", name: "README.txt",      type: "txt",    content: "Welcome to Matriarchs OS!\n\nThis is your personal file system.\nCreate, edit, and delete files freely.", created: Date.now() - 86400000, modified: Date.now() - 86400000 },
-    { id: "2", name: "Notes.txt",       type: "txt",    content: "My notes go here…",                                                                                          created: Date.now() - 3600000,  modified: Date.now() - 3600000  },
-    { id: "3", name: "todo.txt",        type: "txt",    content: "[ ] Set up Matriarchs OS\n[x] Create account\n[ ] Explore the browser",                                      created: Date.now() - 7200000,  modified: Date.now() - 7200000  },
+    { id: "1", name: "README.txt",  type: "txt", content: "Welcome to Matriarchs OS!\n\nThis is your personal file system.\nCreate, edit, and delete files freely.", created: Date.now() - 86400000, modified: Date.now() - 86400000 },
+    { id: "2", name: "Notes.txt",   type: "txt", content: "My notes go here…",                                                                                        created: Date.now() - 3600000,  modified: Date.now() - 3600000  },
+    { id: "3", name: "todo.txt",    type: "txt", content: "[ ] Set up Matriarchs OS\n[x] Create account\n[ ] Explore the browser",                                    created: Date.now() - 7200000,  modified: Date.now() - 7200000  },
   ];
 }
 
@@ -630,7 +628,6 @@ function openFiles() {
         <div class="files-grid" id="files-grid"></div>
       </div>
     </div>
-
     <div class="files-editor" id="files-editor" style="display:none">
       <div class="files-editor-bar">
         <span class="files-editor-name" id="files-editor-name">Untitled</span>
@@ -656,14 +653,11 @@ let currentFileId = null;
 function renderFilesGrid() {
   const grid = document.getElementById("files-grid");
   if (!grid) return;
-
   const files = getFiles();
-
   if (files.length === 0) {
     grid.innerHTML = `<div style="grid-column:1/-1;padding:40px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--text-dim)">No files yet. Click "+ New" to create one.</div>`;
     return;
   }
-
   grid.innerHTML = files.map(f => {
     const ext     = f.name.split(".").pop().toLowerCase();
     const modDate = new Date(f.modified).toLocaleDateString();
@@ -673,7 +667,7 @@ function renderFilesGrid() {
         <div class="files-item-name">${escHtml(f.name)}</div>
         <div class="files-item-meta">${modDate}</div>
         <div class="files-item-actions">
-          <button onclick="event.stopPropagation();filesOpenFile('${f.id}')"  title="Open">✎</button>
+          <button onclick="event.stopPropagation();filesOpenFile('${f.id}')" title="Open">✎</button>
           <button onclick="event.stopPropagation();filesDeleteFile('${f.id}')" title="Delete" style="color:#ff6b6b">✕</button>
         </div>
       </div>
@@ -683,10 +677,10 @@ function renderFilesGrid() {
 
 function getFileIcon(ext) {
   const icons = {
-    txt: `<svg width="28" height="28" viewBox="0 0 24 24"><use href="#ico-files"/></svg>`,
-    js:  `<svg width="28" height="28" viewBox="0 0 24 24"><use href="#ico-term"/></svg>`,
-    html:`<svg width="28" height="28" viewBox="0 0 24 24"><use href="#ico-globe"/></svg>`,
-    css: `<svg width="28" height="28" viewBox="0 0 24 24"><use href="#ico-cog"/></svg>`,
+    txt:  `<svg width="28" height="28" viewBox="0 0 24 24"><use href="#ico-files"/></svg>`,
+    js:   `<svg width="28" height="28" viewBox="0 0 24 24"><use href="#ico-term"/></svg>`,
+    html: `<svg width="28" height="28" viewBox="0 0 24 24"><use href="#ico-globe"/></svg>`,
+    css:  `<svg width="28" height="28" viewBox="0 0 24 24"><use href="#ico-cog"/></svg>`,
   };
   return icons[ext] || icons.txt;
 }
@@ -700,17 +694,14 @@ function filesOpenFile(id) {
   const files = getFiles();
   const file  = files.find(f => f.id === id);
   if (!file) return;
-
   currentFileId = id;
-  const editor     = document.getElementById("files-editor");
-  const nameEl     = document.getElementById("files-editor-name");
-  const areaEl     = document.getElementById("files-editor-area");
-  const winBody    = document.querySelector("#win-files .window-body");
-
+  const editor  = document.getElementById("files-editor");
+  const nameEl  = document.getElementById("files-editor-name");
+  const areaEl  = document.getElementById("files-editor-area");
+  const winBody = document.querySelector("#win-files .window-body");
   if (!editor || !nameEl || !areaEl) return;
-
-  nameEl.textContent = file.name;
-  areaEl.value       = file.content || "";
+  nameEl.textContent   = file.name;
+  areaEl.value         = file.content || "";
   editor.style.display = "flex";
   if (winBody) winBody.style.display = "none";
 }
@@ -729,8 +720,7 @@ function filesSave() {
   const files = getFiles();
   const file  = files.find(f => f.id === currentFileId);
   if (!file) return;
-
-  const areaEl = document.getElementById("files-editor-area");
+  const areaEl  = document.getElementById("files-editor-area");
   file.content  = areaEl ? areaEl.value : "";
   file.modified = Date.now();
   saveFiles(files);
@@ -740,15 +730,11 @@ function filesSave() {
 function filesNewFile() {
   const name = prompt("File name:", "Untitled.txt");
   if (!name || !name.trim()) return;
-
   const files = getFiles();
   const newFile = {
-    id:       Date.now().toString(),
-    name:     name.trim(),
-    type:     name.split(".").pop() || "txt",
-    content:  "",
-    created:  Date.now(),
-    modified: Date.now(),
+    id: Date.now().toString(), name: name.trim(),
+    type: name.split(".").pop() || "txt", content: "",
+    created: Date.now(), modified: Date.now(),
   };
   files.push(newFile);
   saveFiles(files);
@@ -761,9 +747,7 @@ function filesDeleteFile(id) {
   const file  = files.find(f => f.id === id);
   if (!file) return;
   if (!confirm(`Delete "${file.name}"?`)) return;
-
-  const updated = files.filter(f => f.id !== id);
-  saveFiles(updated);
+  saveFiles(files.filter(f => f.id !== id));
   renderFilesGrid();
 }
 
@@ -774,21 +758,12 @@ function filesDeleteFile(id) {
 
 function openCalculator() {
   const existing = document.getElementById("win-calc");
-  if (existing) {
-    existing.classList.remove("minimized");
-    bringToFront("win-calc");
-    return;
-  }
+  if (existing) { existing.classList.remove("minimized"); bringToFront("win-calc"); return; }
 
   const win = document.createElement("div");
   win.className = "window";
   win.id        = "win-calc";
-  win.style.top    = "80px";
-  win.style.left   = "200px";
-  win.style.width  = "280px";
-  win.style.height = "420px";
-  win.style.minWidth  = "280px";
-  win.style.minHeight = "420px";
+  win.style.cssText = "top:80px;left:200px;width:280px;height:420px;min-width:280px;min-height:420px";
 
   win.innerHTML = `
     <div class="window-titlebar">
@@ -806,25 +781,21 @@ function openCalculator() {
           <div class="calc-val"  id="calc-val">0</div>
         </div>
         <div class="calc-grid">
-          <button class="calc-btn calc-span2 calc-fn"  onclick="calcClear()">AC</button>
-          <button class="calc-btn calc-fn"              onclick="calcToggleSign()">+/−</button>
-          <button class="calc-btn calc-op"              onclick="calcOp('/')">÷</button>
-
+          <button class="calc-btn calc-span2 calc-fn" onclick="calcClear()">AC</button>
+          <button class="calc-btn calc-fn" onclick="calcToggleSign()">+/−</button>
+          <button class="calc-btn calc-op" onclick="calcOp('/')">÷</button>
           <button class="calc-btn" onclick="calcNum('7')">7</button>
           <button class="calc-btn" onclick="calcNum('8')">8</button>
           <button class="calc-btn" onclick="calcNum('9')">9</button>
           <button class="calc-btn calc-op" onclick="calcOp('*')">×</button>
-
           <button class="calc-btn" onclick="calcNum('4')">4</button>
           <button class="calc-btn" onclick="calcNum('5')">5</button>
           <button class="calc-btn" onclick="calcNum('6')">6</button>
           <button class="calc-btn calc-op" onclick="calcOp('-')">−</button>
-
           <button class="calc-btn" onclick="calcNum('1')">1</button>
           <button class="calc-btn" onclick="calcNum('2')">2</button>
           <button class="calc-btn" onclick="calcNum('3')">3</button>
           <button class="calc-btn calc-op" onclick="calcOp('+')">+</button>
-
           <button class="calc-btn calc-span2" onclick="calcNum('0')">0</button>
           <button class="calc-btn" onclick="calcDot()">.</button>
           <button class="calc-btn calc-eq" onclick="calcEquals()">=</button>
@@ -836,7 +807,6 @@ function openCalculator() {
   document.getElementById("windows").appendChild(win);
   makeDraggable(win);
   bringToFront("win-calc");
-
   openWindows["win-calc"] = { title: "Calculator", iconId: "cog" };
   refreshTaskbar();
 
@@ -856,12 +826,7 @@ function openCalculator() {
   document.addEventListener("keydown", win._calcKeyHandler);
 }
 
-// Calculator state
-let calcCurrent  = "0";
-let calcPrev     = null;
-let calcOperator = null;
-let calcNewInput = true;
-let calcExprStr  = "";
+let calcCurrent = "0", calcPrev = null, calcOperator = null, calcNewInput = true, calcExprStr = "";
 
 function calcUpdateDisplay() {
   const valEl  = document.getElementById("calc-val");
@@ -869,37 +834,25 @@ function calcUpdateDisplay() {
   if (valEl)  valEl.textContent  = calcCurrent.length > 12 ? parseFloat(calcCurrent).toExponential(4) : calcCurrent;
   if (exprEl) exprEl.textContent = calcExprStr;
 }
-
 function calcNum(n) {
-  if (calcNewInput) {
-    calcCurrent  = n === "0" ? "0" : n;
-    calcNewInput = false;
-  } else {
-    if (calcCurrent === "0" && n !== ".") calcCurrent = n;
-    else if (calcCurrent.length < 14) calcCurrent += n;
-  }
+  if (calcNewInput) { calcCurrent = n === "0" ? "0" : n; calcNewInput = false; }
+  else { if (calcCurrent === "0" && n !== ".") calcCurrent = n; else if (calcCurrent.length < 14) calcCurrent += n; }
   calcUpdateDisplay();
 }
-
 function calcDot() {
   if (calcNewInput) { calcCurrent = "0."; calcNewInput = false; }
   else if (!calcCurrent.includes(".")) calcCurrent += ".";
   calcUpdateDisplay();
 }
-
 function calcOp(op) {
   if (calcOperator && !calcNewInput) calcEquals(true);
-  calcPrev     = parseFloat(calcCurrent);
-  calcOperator = op;
-  calcNewInput = true;
-  const opSymbol = { "+": "+", "-": "−", "*": "×", "/": "÷" }[op] || op;
-  calcExprStr  = calcCurrent + " " + opSymbol;
+  calcPrev = parseFloat(calcCurrent); calcOperator = op; calcNewInput = true;
+  calcExprStr = calcCurrent + " " + ({ "+": "+", "-": "−", "*": "×", "/": "÷" }[op] || op);
   calcUpdateDisplay();
 }
-
 function calcEquals(chaining = false) {
   if (calcPrev === null || calcOperator === null) return;
-  const curr   = parseFloat(calcCurrent);
+  const curr = parseFloat(calcCurrent);
   let result;
   switch (calcOperator) {
     case "+": result = calcPrev + curr; break;
@@ -908,39 +861,17 @@ function calcEquals(chaining = false) {
     case "/": result = curr === 0 ? "Error" : calcPrev / curr; break;
     default:  result = curr;
   }
-
   if (!chaining) {
-    const opSymbol = { "+": "+", "-": "−", "*": "×", "/": "÷" }[calcOperator] || calcOperator;
-    calcExprStr  = calcPrev + " " + opSymbol + " " + curr + " =";
-    calcOperator = null;
-    calcPrev     = null;
+    calcExprStr  = calcPrev + " " + ({ "+": "+", "-": "−", "*": "×", "/": "÷" }[calcOperator] || calcOperator) + " " + curr + " =";
+    calcOperator = null; calcPrev = null;
   }
-
   calcCurrent  = result === "Error" ? "Error" : String(parseFloat(result.toFixed(10)));
   calcNewInput = true;
   calcUpdateDisplay();
 }
-
-function calcClear() {
-  calcCurrent  = "0";
-  calcPrev     = null;
-  calcOperator = null;
-  calcNewInput = true;
-  calcExprStr  = "";
-  calcUpdateDisplay();
-}
-
-function calcToggleSign() {
-  if (calcCurrent === "0" || calcCurrent === "Error") return;
-  calcCurrent = calcCurrent.startsWith("-") ? calcCurrent.slice(1) : "-" + calcCurrent;
-  calcUpdateDisplay();
-}
-
-function calcBackspace() {
-  if (calcNewInput || calcCurrent === "Error") { calcClear(); return; }
-  calcCurrent = calcCurrent.length > 1 ? calcCurrent.slice(0, -1) : "0";
-  calcUpdateDisplay();
-}
+function calcClear() { calcCurrent = "0"; calcPrev = null; calcOperator = null; calcNewInput = true; calcExprStr = ""; calcUpdateDisplay(); }
+function calcToggleSign() { if (calcCurrent === "0" || calcCurrent === "Error") return; calcCurrent = calcCurrent.startsWith("-") ? calcCurrent.slice(1) : "-" + calcCurrent; calcUpdateDisplay(); }
+function calcBackspace() { if (calcNewInput || calcCurrent === "Error") { calcClear(); return; } calcCurrent = calcCurrent.length > 1 ? calcCurrent.slice(0, -1) : "0"; calcUpdateDisplay(); }
 
 
 // ══════════════════════════════════════
@@ -949,19 +880,12 @@ function calcBackspace() {
 
 function openTerminal() {
   const existing = document.getElementById("win-terminal");
-  if (existing) {
-    existing.classList.remove("minimized");
-    bringToFront("win-terminal");
-    return;
-  }
+  if (existing) { existing.classList.remove("minimized"); bringToFront("win-terminal"); return; }
 
   const win = document.createElement("div");
   win.className = "window";
   win.id        = "win-terminal";
-  win.style.top    = "100px";
-  win.style.left   = "150px";
-  win.style.width  = "560px";
-  win.style.height = "340px";
+  win.style.cssText = "top:100px;left:150px;width:560px;height:340px";
 
   const username = getSession() || "user";
 
@@ -991,12 +915,11 @@ function openTerminal() {
   document.getElementById("windows").appendChild(win);
   makeDraggable(win);
   bringToFront("win-terminal");
-
   openWindows["win-terminal"] = { title: "Terminal", iconId: "term" };
   refreshTaskbar();
 
-  const input  = win.querySelector("#term-input");
-  const body   = win.querySelector("#term-body");
+  const input = win.querySelector("#term-input");
+  const body  = win.querySelector("#term-body");
 
   const CMDS = {
     help:    () => ["Available commands:", "  help     — show this list", "  whoami   — show current user", "  ls       — list files", "  clear    — clear terminal", "  date     — show current date/time", "  echo     — echo text", "  version  — OS version"],
@@ -1004,10 +927,7 @@ function openTerminal() {
     date:    () => [new Date().toString()],
     version: () => ["Matriarchs OS v1.0.0 — Sovereign Edition"],
     clear:   () => { body.innerHTML = ""; return []; },
-    ls:      () => {
-      const files = getFiles();
-      return files.length ? files.map(f => "  " + f.name) : ["(no files)"];
-    },
+    ls:      () => { const files = getFiles(); return files.length ? files.map(f => "  " + f.name) : ["(no files)"]; },
   };
 
   input.addEventListener("keydown", (e) => {
@@ -1021,19 +941,14 @@ function openTerminal() {
     cmdLine.innerHTML = `<span class="term-prompt">${escHtml(username)}@mos</span> <span style="color:var(--text-dim)">$</span> <span style="color:var(--text)">${escHtml(raw)}</span>`;
     body.appendChild(cmdLine);
 
-    const parts  = raw.split(" ");
-    const cmd    = parts[0].toLowerCase();
-    const args   = parts.slice(1).join(" ");
+    const parts = raw.split(" ");
+    const cmd   = parts[0].toLowerCase();
+    const args  = parts.slice(1).join(" ");
+    let lines   = [];
 
-    let lines = [];
-
-    if (cmd === "echo") {
-      lines = [args];
-    } else if (CMDS[cmd]) {
-      lines = CMDS[cmd]() || [];
-    } else {
-      lines = [`bash: ${cmd}: command not found`];
-    }
+    if (cmd === "echo") lines = [args];
+    else if (CMDS[cmd]) lines = CMDS[cmd]() || [];
+    else lines = [`bash: ${cmd}: command not found`];
 
     lines.forEach(l => {
       const lineEl = document.createElement("div");
@@ -1041,7 +956,6 @@ function openTerminal() {
       lineEl.textContent = l;
       body.appendChild(lineEl);
     });
-
     body.scrollTop = body.scrollHeight;
   });
 
@@ -1066,17 +980,8 @@ function openSettings() {
 window.addEventListener("DOMContentLoaded", () => {
   const session = getSession();
 
-  if (session && isUserKicked(session)) {
-    clearSession();
-    location.reload();
-    return;
-  }
-
-  if (session && session !== OWNER_USERNAME && isUserBanned(session)) {
-    clearSession();
-    location.reload();
-    return;
-  }
+  if (session && isUserKicked(session)) { clearSession(); location.reload(); return; }
+  if (session && session !== OWNER_USERNAME && isUserBanned(session)) { clearSession(); location.reload(); return; }
 
   if (session) {
     const visitKey   = "mos_visited_" + session;
@@ -1091,45 +996,9 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  document.getElementById("login-password")?.addEventListener("keydown", e => {
-    if (e.key === "Enter") doLogin();
-  });
-  document.getElementById("login-username")?.addEventListener("keydown", e => {
-    if (e.key === "Enter") doLogin();
-  });
-  document.getElementById("signup-confirm")?.addEventListener("keydown", e => {
-    if (e.key === "Enter") doSignup();
-  });
-});
-
-
-// ══════════════════════════════════════
-//  SCRAMJET INIT
-// ══════════════════════════════════════
-//  NOTE: registerSW is defined in register-sw.js (loaded before this file).
-//  Do NOT redefine it here — that was causing the SW registration to break.
-// ══════════════════════════════════════
-
-let scramjet   = null;
-let connection = null;
-
-window.addEventListener("DOMContentLoaded", () => {
-  try {
-    const { ScramjetController } = $scramjetLoadController();
-    scramjet = new ScramjetController({
-      files: {
-        wasm: "/scram/scramjet.wasm.wasm",
-        all:  "/scram/scramjet.all.js",
-        sync: "/scram/scramjet.sync.js",
-      },
-    });
-
-    scramjet.init("/sw.js");
-
-    connection = new BareMux.BareMuxConnection("/baremux/worker.js");
-  } catch (e) {
-    console.warn("Scramjet init failed:", e);
-  }
+  document.getElementById("login-password")?.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+  document.getElementById("login-username")?.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+  document.getElementById("signup-confirm")?.addEventListener("keydown", e => { if (e.key === "Enter") doSignup(); });
 });
 
 
@@ -1152,11 +1021,7 @@ function closeWindow(id) {
   if (w._calcKeyHandler) document.removeEventListener("keydown", w._calcKeyHandler);
   w.style.opacity   = "0";
   w.style.transform = "scale(0.9)";
-  setTimeout(() => {
-    w.remove();
-    delete openWindows[id];
-    refreshTaskbar();
-  }, 200);
+  setTimeout(() => { w.remove(); delete openWindows[id]; refreshTaskbar(); }, 200);
 }
 
 function minimizeWindow(id) {
@@ -1169,7 +1034,6 @@ function minimizeWindow(id) {
 function maximizeWindow(id) {
   const w = document.getElementById(id);
   if (!w) return;
-
   if (w.dataset.maximized) {
     w.style.top    = w.dataset.origTop;
     w.style.left   = w.dataset.origLeft;
@@ -1193,9 +1057,7 @@ function maximizeWindow(id) {
 function makeDraggable(win) {
   const bar = win.querySelector(".window-titlebar");
   if (!bar) return;
-
   let ox = 0, oy = 0, dragging = false;
-
   bar.addEventListener("mousedown", (e) => {
     if (e.target.classList.contains("wbtn")) return;
     if (win.dataset.maximized) return;
@@ -1205,13 +1067,7 @@ function makeDraggable(win) {
     bringToFront(win.id);
     e.preventDefault();
   });
-
-  document.addEventListener("mousemove", (e) => {
-    if (!dragging) return;
-    win.style.left = (e.clientX - ox) + "px";
-    win.style.top  = (e.clientY - oy) + "px";
-  });
-
+  document.addEventListener("mousemove", (e) => { if (!dragging) return; win.style.left = (e.clientX - ox) + "px"; win.style.top = (e.clientY - oy) + "px"; });
   document.addEventListener("mouseup", () => { dragging = false; });
   win.addEventListener("mousedown", () => bringToFront(win.id));
 }
@@ -1228,34 +1084,21 @@ function refreshTaskbar() {
 
   for (const [id, info] of Object.entries(openWindows)) {
     const win       = document.getElementById(id);
-    const isOpen    = !!win;
     const isMin     = win && win.classList.contains("minimized");
     const isFocused = win && parseInt(win.style.zIndex || 0) === zTop;
 
     const btn = document.createElement("button");
     btn.className = "taskbar-btn open" + (isFocused && !isMin ? " active" : "");
     btn.title     = info.title;
-
-    btn.innerHTML = `
-      <svg width="14" height="14" viewBox="0 0 24 24">
-        <use href="#ico-${info.iconId}"/>
-      </svg>
-      <span>${info.title}</span>
-    `;
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24"><use href="#ico-${info.iconId}"/></svg><span>${info.title}</span>`;
 
     btn.addEventListener("click", () => {
-      if (!isOpen) return;
-      if (isMin) {
-        win.classList.remove("minimized");
-        bringToFront(id);
-      } else if (isFocused) {
-        win.classList.add("minimized");
-      } else {
-        bringToFront(id);
-      }
+      if (!win) return;
+      if (isMin) { win.classList.remove("minimized"); bringToFront(id); }
+      else if (isFocused) { win.classList.add("minimized"); }
+      else { bringToFront(id); }
       refreshTaskbar();
     });
-
     container.appendChild(btn);
   }
 }
@@ -1288,16 +1131,12 @@ document.addEventListener("click", (e) => {
 
 
 // ══════════════════════════════════════
-//  BROWSER WINDOW
+//  BROWSER WINDOW  ← Server-side proxy
 // ══════════════════════════════════════
 
 function openBrowser() {
   const existing = document.getElementById("win-browser");
-  if (existing) {
-    existing.classList.remove("minimized");
-    bringToFront("win-browser");
-    return;
-  }
+  if (existing) { existing.classList.remove("minimized"); bringToFront("win-browser"); return; }
 
   const tpl   = document.getElementById("browser-window-tpl");
   const clone = tpl.content.cloneNode(true);
@@ -1311,42 +1150,72 @@ function openBrowser() {
   refreshTaskbar();
 
   const addrEl    = document.getElementById("sj-address");
-  const engineEl  = document.getElementById("sj-search-engine");
-  const errorEl   = document.getElementById("sj-error");
-  const errCodeEl = document.getElementById("sj-error-code");
   const frameWrap = document.getElementById("sj-frame-wrap");
   const goBtn     = document.getElementById("sj-go");
+  const errorEl   = document.getElementById("sj-error");
+  const errCodeEl = document.getElementById("sj-error-code");
 
-  async function navigate() {
+  // History stack for back/forward
+  let history = [];
+  let historyIdx = -1;
+
+  function navigate(rawUrl) {
+    if (!rawUrl || !rawUrl.trim()) return;
     errorEl.textContent   = "";
     errCodeEl.textContent = "";
 
-    try {
-      await registerSW();
-    } catch (err) {
-      errorEl.textContent   = "Failed to register service worker.";
-      errCodeEl.textContent = err.toString();
-      return;
+    // Build absolute URL
+    let url = rawUrl.trim();
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      // Treat as search if no dots or has spaces
+      if (url.includes(" ") || !url.includes(".")) {
+        url = "https://www.google.com/search?q=" + encodeURIComponent(url);
+      } else {
+        url = "https://" + url;
+      }
     }
 
-    const url     = search(addrEl.value, engineEl.value);
-    const wispUrl = (location.protocol === "https:" ? "wss" : "ws") +
-                    "://" + location.host + "/wisp/";
+    const proxyUrl = "/proxy?url=" + encodeURIComponent(url);
 
-    if ((await connection.getTransport()) !== "/libcurl/index.mjs") {
-      await connection.setTransport("/libcurl/index.mjs", [{ websocket: wispUrl }]);
-    }
-
+    // Clear old frame
     frameWrap.innerHTML = "";
-    const frame = scramjet.createFrame();
-    frameWrap.appendChild(frame.frame);
-    frame.go(url);
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "width:100%;height:100%;border:none;background:#fff";
+    iframe.src = proxyUrl;
+    frameWrap.appendChild(iframe);
+
+    // Update address bar
+    addrEl.value = url;
+
+    // Update history
+    history = history.slice(0, historyIdx + 1);
+    history.push(url);
+    historyIdx = history.length - 1;
+
+    updateNavBtns();
   }
 
-  goBtn.addEventListener("click", navigate);
-  addrEl.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") navigate();
+  function updateNavBtns() {
+    const backBtn   = document.getElementById("sj-back");
+    const fwdBtn    = document.getElementById("sj-fwd");
+    if (backBtn) backBtn.disabled = historyIdx <= 0;
+    if (fwdBtn)  fwdBtn.disabled  = historyIdx >= history.length - 1;
+  }
+
+  goBtn.addEventListener("click", () => navigate(addrEl.value));
+  addrEl.addEventListener("keydown", (e) => { if (e.key === "Enter") navigate(addrEl.value); });
+
+  document.getElementById("sj-back")?.addEventListener("click", () => {
+    if (historyIdx > 0) { historyIdx--; navigate(history[historyIdx]); historyIdx--; }
   });
+  document.getElementById("sj-fwd")?.addEventListener("click", () => {
+    if (historyIdx < history.length - 1) { historyIdx++; navigate(history[historyIdx]); historyIdx--; }
+  });
+  document.getElementById("sj-reload")?.addEventListener("click", () => {
+    if (history[historyIdx]) navigate(history[historyIdx]);
+  });
+
+  updateNavBtns();
 }
 
 
@@ -1356,11 +1225,7 @@ function openBrowser() {
 
 function openAbout() {
   const existing = document.getElementById("win-about");
-  if (existing) {
-    existing.classList.remove("minimized");
-    bringToFront("win-about");
-    return;
-  }
+  if (existing) { existing.classList.remove("minimized"); bringToFront("win-about"); return; }
 
   const win = document.createElement("div");
   win.className = "window";
@@ -1378,15 +1243,13 @@ function openAbout() {
     <div class="window-body">
       <div class="about-body">
         <div class="about-sigil">
-          <svg width="40" height="40" viewBox="0 0 24 24">
-            <use href="#ico-hex"/>
-          </svg>
+          <svg width="40" height="40" viewBox="0 0 24 24"><use href="#ico-hex"/></svg>
         </div>
         <div class="about-name">MATRIARCHS OS</div>
         <div class="about-sub">SOVEREIGN EDITION — v1.0.0</div>
         <div class="about-divider"></div>
         <div class="about-info">
-          Scramjet + BareMux<br>
+          Server-Side Proxy<br>
           Mercury Workshop
         </div>
       </div>
@@ -1396,7 +1259,6 @@ function openAbout() {
   document.getElementById("windows").appendChild(win);
   makeDraggable(win);
   bringToFront("win-about");
-
   openWindows["win-about"] = { title: "About", iconId: "hex" };
   refreshTaskbar();
 }
