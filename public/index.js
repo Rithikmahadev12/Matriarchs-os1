@@ -823,7 +823,7 @@ function openBrowser() {
 
   let navHistory=[], navIdx=-1;
 
-  function navigate(rawUrl) {
+  function navigate(rawUrl, force=false) {
     if (!rawUrl||!rawUrl.trim()) return;
     if(errorEl) errorEl.textContent="";
     if(errCodeEl) errCodeEl.textContent="";
@@ -831,12 +831,19 @@ function openBrowser() {
     if (!url.startsWith("http://")&&!url.startsWith("https://")) {
       url=(url.includes(" ")||!url.includes(".")) ? getSearchUrl(url) : "https://"+url;
     }
-    frameWrap.innerHTML="";
-    const iframe=document.createElement("iframe");
-    iframe.style.cssText="width:100%;height:100%;border:none;background:#fff";
-    iframe.sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
-    iframe.src="/proxy/?url="+encodeURIComponent(url);
-    frameWrap.appendChild(iframe);
+    const proxyUrl="/proxy/?url="+encodeURIComponent(url);
+    const existing=frameWrap.querySelector("iframe");
+    if (existing && !force) {
+      existing.src=proxyUrl;
+    } else {
+      // Force: tear down and recreate iframe so it definitely navigates
+      frameWrap.innerHTML="";
+      const iframe=document.createElement("iframe");
+      iframe.style.cssText="width:100%;height:100%;border:none;background:#fff";
+      iframe.sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
+      iframe.src=proxyUrl;
+      frameWrap.appendChild(iframe);
+    }
     addrEl.value=url;
     navHistory=navHistory.slice(0,navIdx+1);
     navHistory.push(url);
@@ -850,11 +857,59 @@ function openBrowser() {
     if(f) f.disabled=navIdx>=navHistory.length-1;
   }
 
-  goBtn.addEventListener("click",()=>navigate(addrEl.value));
-  addrEl.addEventListener("keydown",(e)=>{if(e.key==="Enter")navigate(addrEl.value);});
-  document.getElementById("sj-back")?.addEventListener("click",()=>{ if(navIdx>0){navIdx--;addrEl.value=navHistory[navIdx];const iframe=frameWrap.querySelector("iframe");if(iframe)iframe.src="/proxy/?url="+encodeURIComponent(navHistory[navIdx]);updateNavBtns();} });
-  document.getElementById("sj-fwd")?.addEventListener("click",()=>{ if(navIdx<navHistory.length-1){navIdx++;addrEl.value=navHistory[navIdx];const iframe=frameWrap.querySelector("iframe");if(iframe)iframe.src="/proxy/?url="+encodeURIComponent(navHistory[navIdx]);updateNavBtns();} });
-  document.getElementById("sj-reload")?.addEventListener("click",()=>{ const iframe=frameWrap.querySelector("iframe");if(iframe)iframe.src=iframe.src; });
+  goBtn.addEventListener("click", () => {
+    const typed = addrEl.value.trim();
+    if (!typed) return;
+    // Always force navigate even if same URL
+    navigate(typed, true);
+  });
+  addrEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      const typed = addrEl.value.trim();
+      if (typed) navigate(typed, true);
+    }
+  });
+  document.getElementById("sj-back")?.addEventListener("click", () => {
+    if (navIdx > 0) {
+      navIdx--;
+      addrEl.value = navHistory[navIdx];
+      const iframe = frameWrap.querySelector("iframe");
+      if (iframe) iframe.src = "/proxy/?url=" + encodeURIComponent(navHistory[navIdx]);
+      updateNavBtns();
+    }
+  });
+  document.getElementById("sj-fwd")?.addEventListener("click", () => {
+    if (navIdx < navHistory.length - 1) {
+      navIdx++;
+      addrEl.value = navHistory[navIdx];
+      const iframe = frameWrap.querySelector("iframe");
+      if (iframe) iframe.src = "/proxy/?url=" + encodeURIComponent(navHistory[navIdx]);
+      updateNavBtns();
+    }
+  });
+  document.getElementById("sj-reload")?.addEventListener("click", () => {
+    const iframe = frameWrap.querySelector("iframe");
+    if (iframe) {
+      const src = iframe.src;
+      iframe.src = "";
+      setTimeout(() => { iframe.src = src; }, 50);
+    }
+  });
+
+  // Update address bar when iframe navigates internally via link clicks
+  frameWrap.addEventListener("load", (e) => {
+    if (e.target.tagName === "IFRAME") {
+      try {
+        const src = e.target.src;
+        const match = src.match(/[?&]url=([^&]+)/);
+        if (match) {
+          const decoded = decodeURIComponent(match[1]);
+          addrEl.value = decoded;
+        }
+      } catch(err) {}
+    }
+  }, true);
+
   updateNavBtns();
 }
 
