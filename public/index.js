@@ -896,19 +896,23 @@ function openBrowser() {
     }
   });
 
-  // Update address bar when iframe navigates internally via link clicks
+  // Update address bar when iframe navigates (via load event or postMessage)
   frameWrap.addEventListener("load", (e) => {
     if (e.target.tagName === "IFRAME") {
       try {
-        const src = e.target.src;
+        const src = e.target.src || "";
         const match = src.match(/[?&]url=([^&]+)/);
-        if (match) {
-          const decoded = decodeURIComponent(match[1]);
-          addrEl.value = decoded;
-        }
+        if (match) addrEl.value = decodeURIComponent(match[1]);
       } catch(err) {}
     }
   }, true);
+
+  // Also update from postMessage sent by injected script (pushState navigations)
+  window.addEventListener("message", (e) => {
+    if (e.data && e.data.type === "mos-nav" && e.data.url) {
+      addrEl.value = e.data.url;
+    }
+  });
 
   updateNavBtns();
 }
