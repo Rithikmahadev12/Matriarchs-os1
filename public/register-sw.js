@@ -1,41 +1,38 @@
 "use strict";
 
-const stockSW = "./sw.js";
+// ══════════════════════════════════════
+//  REGISTER SERVICE WORKER
+//  Scoped to /proxy/ — NOT root scope
+//  This is KEY: /proxy/ is narrower than /
+//  so no Service-Worker-Allowed header needed,
+//  which means BunnyCDN can't block it.
+// ══════════════════════════════════════
 
-/**
- * List of hostnames that are allowed to run serviceworkers on http://
- */
-const swAllowedHostnames = ["localhost", "127.0.0.1"];
-
-/**
- * Global util
- * Used in 404.html and index.html
- *
- * FIX: Register with an explicit scope instead of defaulting to root ("/").
- * School Chrome policies often block root-scope SW registration.
- * Scoping to a subdirectory bypasses this restriction, matching what
- * working proxy sites (Ultraviolet, etc.) do.
- */
 async function registerSW() {
-  if (!navigator.serviceWorker) {
-    if (
-      location.protocol !== "https:" &&
-      !swAllowedHostnames.includes(location.hostname)
-    )
-      throw new Error("Service workers cannot be registered without https.");
-    throw new Error("Your browser doesn't support service workers.");
-  }
+  if (!("serviceWorker" in navigator)) return;
 
   try {
-    // Try scoped registration first — works on most restricted school accounts
-    await navigator.serviceWorker.register(stockSW, { scope: "./" });
-  } catch (scopedErr) {
-    try {
-      // Fallback: try root scope
-      await navigator.serviceWorker.register(stockSW);
-    } catch (rootErr) {
-      // Last resort: try registering from an explicit path
-      await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    const reg = await navigator.serviceWorker.register("/sw.js", {
+      scope: "/proxy/",
+    });
+
+    // Wait for it to be active
+    if (reg.installing) {
+      await new Promise((resolve) => {
+        reg.installing.addEventListener("statechange", (e) => {
+          if (e.target.state === "activated") resolve();
+        });
+      });
     }
+
+    return reg;
+  } catch (err) {
+    console.warn("SW registration failed:", err);
+    // Not fatal — server-side rewriting still handles most things
   }
 }
+
+// Register on page load
+window.addEventListener("DOMContentLoaded", () => {
+  registerSW();
+});
