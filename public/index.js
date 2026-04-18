@@ -756,6 +756,20 @@ document.addEventListener("click",(e)=>{
 //  BROWSER WINDOW — Custom Proxy
 // ══════════════════════════════════════
 
+const SEARCH_ENGINES = {
+  brave:     { label: "Brave",      url: "https://search.brave.com/search?q=%s" },
+  ddg:       { label: "DuckDuckGo", url: "https://duckduckgo.com/?q=%s" },
+  google:    { label: "Google",     url: "https://www.google.com/search?q=%s" },
+  bing:      { label: "Bing",       url: "https://www.bing.com/search?q=%s" },
+  startpage: { label: "Startpage",  url: "https://www.startpage.com/search?q=%s" },
+};
+
+let currentEngine = localStorage.getItem("mos_engine") || "brave";
+function getSearchUrl(q) {
+  const e = SEARCH_ENGINES[currentEngine] || SEARCH_ENGINES.brave;
+  return e.url.replace("%s", encodeURIComponent(q));
+}
+
 function openBrowser() {
   const existing=document.getElementById("win-browser");
   if(existing){existing.classList.remove("minimized");bringToFront("win-browser");return;}
@@ -775,27 +789,54 @@ function openBrowser() {
   const errorEl   = document.getElementById("sj-error");
   const errCodeEl = document.getElementById("sj-error-code");
 
+  // ── Search engine picker ──
+  const browserBar = win.querySelector(".browser-bar");
+  if (browserBar) {
+    const picker = document.createElement("div");
+    picker.style.cssText = "position:relative;display:flex;align-items:center;flex-shrink:0";
+    const btn = document.createElement("button");
+    btn.style.cssText = "background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:var(--text-dim);font-family:var(--mono);font-size:10px;padding:4px 8px;border-radius:4px;cursor:pointer;white-space:nowrap;margin-right:6px;letter-spacing:0.04em;";
+    btn.textContent = SEARCH_ENGINES[currentEngine]?.label || "Brave";
+    const drop = document.createElement("div");
+    drop.style.cssText = "display:none;position:absolute;top:calc(100% + 6px);left:0;background:#0d1a10;border:1px solid rgba(255,255,255,0.12);border-radius:6px;overflow:hidden;z-index:9999;min-width:130px;box-shadow:0 8px 24px rgba(0,0,0,0.5);";
+    Object.entries(SEARCH_ENGINES).forEach(([key, eng]) => {
+      const item = document.createElement("div");
+      item.style.cssText = "padding:8px 14px;font-family:var(--mono);font-size:11px;color:"+(key===currentEngine?"var(--gold)":"var(--text-dim)")+";cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.05);";
+      item.textContent = eng.label;
+      item.onmouseenter = () => item.style.background = "rgba(255,255,255,0.06)";
+      item.onmouseleave = () => item.style.background = "";
+      item.onclick = () => {
+        currentEngine = key; localStorage.setItem("mos_engine", key);
+        btn.textContent = eng.label;
+        drop.querySelectorAll("div").forEach(d => d.style.color = "var(--text-dim)");
+        item.style.color = "var(--gold)";
+        drop.style.display = "none";
+      };
+      drop.appendChild(item);
+    });
+    btn.onclick = (e) => { e.stopPropagation(); drop.style.display = drop.style.display==="none"?"block":"none"; };
+    document.addEventListener("click", () => { drop.style.display = "none"; });
+    picker.appendChild(btn); picker.appendChild(drop);
+    const addr = browserBar.querySelector("#sj-address");
+    if (addr) browserBar.insertBefore(picker, addr);
+  }
+
   let navHistory=[], navIdx=-1;
 
   function navigate(rawUrl) {
     if (!rawUrl||!rawUrl.trim()) return;
-    errorEl.textContent=""; errCodeEl.textContent="";
-
+    if(errorEl) errorEl.textContent="";
+    if(errCodeEl) errCodeEl.textContent="";
     let url=rawUrl.trim();
     if (!url.startsWith("http://")&&!url.startsWith("https://")) {
-      url=(url.includes(" ")||!url.includes("."))
-        ? "https://www.google.com/search?q="+encodeURIComponent(url)
-        : "https://"+url;
+      url=(url.includes(" ")||!url.includes(".")) ? getSearchUrl(url) : "https://"+url;
     }
-
-    const proxyUrl="/proxy/?url="+encodeURIComponent(url);
     frameWrap.innerHTML="";
     const iframe=document.createElement("iframe");
     iframe.style.cssText="width:100%;height:100%;border:none;background:#fff";
     iframe.sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
-    iframe.src=proxyUrl;
+    iframe.src="/proxy/?url="+encodeURIComponent(url);
     frameWrap.appendChild(iframe);
-
     addrEl.value=url;
     navHistory=navHistory.slice(0,navIdx+1);
     navHistory.push(url);
@@ -814,7 +855,6 @@ function openBrowser() {
   document.getElementById("sj-back")?.addEventListener("click",()=>{ if(navIdx>0){navIdx--;addrEl.value=navHistory[navIdx];const iframe=frameWrap.querySelector("iframe");if(iframe)iframe.src="/proxy/?url="+encodeURIComponent(navHistory[navIdx]);updateNavBtns();} });
   document.getElementById("sj-fwd")?.addEventListener("click",()=>{ if(navIdx<navHistory.length-1){navIdx++;addrEl.value=navHistory[navIdx];const iframe=frameWrap.querySelector("iframe");if(iframe)iframe.src="/proxy/?url="+encodeURIComponent(navHistory[navIdx]);updateNavBtns();} });
   document.getElementById("sj-reload")?.addEventListener("click",()=>{ const iframe=frameWrap.querySelector("iframe");if(iframe)iframe.src=iframe.src; });
-
   updateNavBtns();
 }
 
