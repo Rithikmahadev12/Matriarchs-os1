@@ -42,15 +42,7 @@ function rewriteTargetUrl(url) {
     if (u.hostname === "tiktok.com" || u.hostname === "www.tiktok.com") {
       return "https://tok.smahat.cn/";
     }
-    // YouTube → Invidious (open source YT frontend, proxy-friendly)
-    if (u.hostname === "youtube.com" || u.hostname === "www.youtube.com") {
-      u.hostname = "yewtu.be"; // public Invidious instance
-      return u.toString();
-    }
-    if (u.hostname === "youtu.be") {
-      const videoId = u.pathname.slice(1);
-      return "https://inv.nadeko.net/watch?v=" + videoId;
-    }
+    // YouTube — handled by the YouTube app window directly
   } catch {}
   return url;
 }
@@ -447,6 +439,163 @@ fastify.get("/tiktok/search", async (req, reply) => {
     return reply.send(data);
   } catch (err) {
     return reply.code(502).send({ error: err.message });
+  }
+});
+
+// ── 404 ───────────────────────────────────────────────────────────────────────
+
+fastify.setNotFoundHandler((req, reply) => {
+  return reply.code(404).type("text/html").sendFile("404.html");
+});
+
+// ── START ─────────────────────────────────────────────────────────────────────
+
+fastify.server.on("listening", () => {
+  const a = fastify.server.address();
+  console.log(`Listening on http://localhost:${a.port}`);
+});
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+function shutdown() { fastify.close(); process.exit(0); }
+
+let port = parseInt(process.env.PORT || "");
+if (isNaN(port)) port = 8080;
+fastify.listen({ port, host: "0.0.0.0" });
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  YOUTUBE / INVIDIOUS API  
+//  Hits Invidious API directly — no proxy needed, CSS works perfectly
+// ══════════════════════════════════════════════════════════════════════════════
+
+const INVIDIOUS_INSTANCES = [
+  "https://yewtu.be",
+  "https://inv.nadeko.net",
+  "https://invidious.nerdvpn.de",
+  "https://invidious.privacyredirect.com",
+];
+
+async function invidiousFetch(path) {
+  for (const instance of INVIDIOUS_INSTANCES) {
+    try {
+      const res = await fetch(instance + path, {
+        headers: { "Accept": "application/json" },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.ok) return await res.json();
+    } catch {}
+  }
+  throw new Error("All Invidious instances failed");
+}
+
+// GET /api/youtube/search?q=query
+fastify.get("/api/youtube/search", async (req, reply) => {
+  reply.header("access-control-allow-origin", "*");
+  const q = (req.query.q || "").trim();
+  if (!q) return reply.send({ results: [] });
+  try {
+    const data = await invidiousFetch(`/api/v1/search?q=${encodeURIComponent(q)}&type=video&fields=videoId,title,author,lengthSeconds,viewCount,publishedText,videoThumbnails`);
+    return reply.send({ results: data });
+  } catch (err) {
+    return reply.code(502).send({ error: err.message });
+  }
+});
+
+// GET /api/youtube/trending
+fastify.get("/api/youtube/trending", async (req, reply) => {
+  reply.header("access-control-allow-origin", "*");
+  try {
+    const data = await invidiousFetch("/api/v1/trending?fields=videoId,title,author,lengthSeconds,viewCount,publishedText,videoThumbnails");
+    return reply.send({ results: data });
+  } catch (err) {
+    return reply.code(502).send({ error: err.message });
+  }
+});
+
+// GET /api/youtube/video?id=VIDEO_ID — get video details + stream URL
+fastify.get("/api/youtube/video", async (req, reply) => {
+  reply.header("access-control-allow-origin", "*");
+  const id = req.query.id;
+  if (!id) return reply.code(400).send({ error: "Missing id" });
+  try {
+    const data = await invidiousFetch(`/api/v1/videos/${id}?fields=videoId,title,author,description,viewCount,likeCount,lengthSeconds,adaptiveFormats,formatStreams,videoThumbnails`);
+    return reply.send(data);
+  } catch (err) {
+    return reply.code(502).send({ error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  TIKTOK SCRAPER
+//  Uses TikTok's internal web API endpoints with browser-like headers
+// ══════════════════════════════════════════════════════════════════════════════
+
+const TT_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+  "Accept": "application/json, text/plain, */*",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Referer": "https://www.tiktok.com/",
+  "sec-fetch-site": "same-site",
+};
+
+async function ttFetch(url) {
+  const res = await fetch(url, {
+    headers: TT_HEADERS,
+    signal: AbortSignal.timeout(10000),
+  });
+  return res.json();
+}
+
+// GET /api/tiktok/trending
+fastify.get("/api/tiktok/trending", async (req, reply) => {
+  reply.header("access-control-allow-origin", "*");
+  try {
+    const data = await ttFetch(
+      "https://www.tiktok.com/api/recommend/itemlist/?aid=1988&count=20&type=5&device_platform=web_mobile"
+    );
+    const videos = (data.itemList || []).map(item => ({
+      id: item.id,
+      desc: item.desc,
+      author: item.author?.nickname || item.author?.uniqueId,
+      cover: item.video?.cover,
+      playUrl: item.video?.playAddr,
+      likeCount: item.stats?.diggCount,
+      viewCount: item.stats?.playCount,
+      shareCount: item.stats?.shareCount,
+      embedUrl: `https://www.tiktok.com/embed/v2/${item.id}`,
+    }));
+    return reply.send({ videos });
+  } catch (err) {
+    return reply.code(502).send({ error: err.message, videos: [] });
+  }
+});
+
+// GET /api/tiktok/search?q=query
+fastify.get("/api/tiktok/search", async (req, reply) => {
+  reply.header("access-control-allow-origin", "*");
+  const q = (req.query.q || "").trim();
+  if (!q) return reply.send({ videos: [] });
+  try {
+    const data = await ttFetch(
+      `https://www.tiktok.com/api/search/general/full/?aid=1988&keyword=${encodeURIComponent(q)}&count=20&device_platform=web_mobile`
+    );
+    const videos = (data.data || [])
+      .filter(r => r.item)
+      .map(r => r.item)
+      .map(item => ({
+        id: item.id,
+        desc: item.desc,
+        author: item.author?.nickname || item.author?.uniqueId,
+        cover: item.video?.cover,
+        playUrl: item.video?.playAddr,
+        likeCount: item.stats?.diggCount,
+        viewCount: item.stats?.playCount,
+        shareCount: item.stats?.shareCount,
+        embedUrl: `https://www.tiktok.com/embed/v2/${item.id}`,
+      }));
+    return reply.send({ videos });
+  } catch (err) {
+    return reply.code(502).send({ error: err.message, videos: [] });
   }
 });
 
