@@ -442,14 +442,6 @@ fastify.get("/tiktok/search", async (req, reply) => {
   }
 });
 
-// ── 404 ───────────────────────────────────────────────────────────────────────
-
-fastify.setNotFoundHandler((req, reply) => {
-  return reply.code(404).type("text/html").sendFile("404.html");
-});
-
-// ── START ─────────────────────────────────────────────────────────────────────
-
 // ══════════════════════════════════════════════════════════════════════════════
 //  YOUTUBE / INVIDIOUS API  
 //  Hits Invidious API directly — no proxy needed, CSS works perfectly
