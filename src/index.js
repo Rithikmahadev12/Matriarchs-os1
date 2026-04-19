@@ -40,7 +40,7 @@ function rewriteTargetUrl(url) {
     const u = new URL(url);
     // TikTok → lite version
     if (u.hostname === "tiktok.com" || u.hostname === "www.tiktok.com") {
-      u.hostname = "lite.tiktok.com";
+      u.hostname = "vm.tiktok.com"; u.pathname = "/";
       return u.toString();
     }
     // YouTube → Invidious (open source YT frontend, proxy-friendly)
@@ -120,20 +120,26 @@ function rewriteHtml(html, base) {
   // Remove CSP
   html = html.replace(/<meta[^>]+http-equiv=["']Content-Security-Policy["'][^>]*\/?>/gi, "");
 
-  // Rewrite ALL attribute values — use a robust tokenizer approach
-  // Process src= attributes (scripts, images, iframes, video, audio)
+  // Rewrite <link> tags — stylesheet hrefs go to fetch proxy, others to page proxy
+  html = html.replace(/<link(\s[^>]*)>/gi, (tag, attrs) => {
+    const isStylesheet = /rel=["']([^"']*\bstylesheet\b[^"']*)["']/i.test(attrs)
+                      || /rel=["']([^"']*\bpreload\b[^"']*)["']/i.test(attrs);
+    attrs = attrs.replace(/\shref\s*=\s*(["'])([^"']+)\1/gi, (m, q, url) => {
+      if (!url || url.startsWith("data:") || url.startsWith("#") || url.startsWith("javascript:")) return m;
+      return ` href=${q}${isStylesheet ? toFetch(url, base) : toPage(url, base)}${q}`;
+    });
+    return `<link${attrs}>`;
+  });
+
+  // src= attributes (scripts, images, iframes, video, audio)
   html = html.replace(/\bsrc\s*=\s*(["'])(.*?)\1/gi, (m, q, url) =>
     `src=${q}${toFetch(url, base)}${q}`);
 
-  // Rewrite href= — distinguish stylesheets from navigation links
-  html = html.replace(/\bhref\s*=\s*(["'])(.*?)\1/gi, (m, q, url) => {
-    const trimmed = url.trim();
-    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("javascript:") ||
-        trimmed.startsWith("mailto:") || trimmed.startsWith("data:")) return m;
-    // If it looks like a stylesheet URL, use fetch proxy
-    if (trimmed.match(/\.(css)(\?|$)/i)) return `href=${q}${toFetch(url, base)}${q}`;
-    // Otherwise page proxy
-    return `href=${q}${toPage(url, base)}${q}`;
+  // href= on non-link tags (anchors etc)
+  html = html.replace(/(<(?!link)[a-z][^>]*?)\shref\s*=\s*(["'])([^"']+)\2/gi, (m, pre, q, url) => {
+    if (!url || url.startsWith("data:") || url.startsWith("#") || url.startsWith("javascript:") ||
+        url.startsWith("mailto:") || url.startsWith("/proxy/")) return m;
+    return `${pre} href=${q}${toPage(url, base)}${q}`;
   });
 
   // action= on forms
@@ -151,19 +157,11 @@ function rewriteHtml(html, base) {
     return `srcset=${q}${rw}${q}`;
   });
 
-  // content= on meta refresh
-  html = html.replace(/(<meta[^>]+http-equiv=["']refresh["'][^>]*content=["'])([^"']+)(["'])/gi,
-    (m, pre, val, post) => {
-      const match = val.match(/^(\d+;\s*url=)(.+)$/i);
-      if (match) return `${pre}${match[1]}${toPage(match[2], base)}${post}`;
-      return m;
-    });
-
-  // Rewrite <style> blocks
+  // <style> blocks
   html = html.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/gi,
     (m, open, css, close) => open + rewriteCss(css, base) + close);
 
-  // Rewrite inline style= attributes
+  // inline style= attributes
   html = html.replace(/\bstyle\s*=\s*(["'])(.*?)\1/gi,
     (m, q, css) => `style=${q}${rewriteCss(css, base)}${q}`);
 
@@ -273,15 +271,9 @@ fastify.get("/proxy/", async (req, reply) => {
     // Use original target URL as base (not the rewritten one) so links resolve correctly
     const finalUrl = targetUrl.toString();
 
-    // Not HTML? Show error with injection so links still proxy
+    // Not HTML? Redirect to fetch proxy so browser gets raw resource
     if (ct && !ct.includes("text/html") && !ct.includes("xhtml") && ct !== "") {
-      const errHtml = makeInjection(targetUrl.origin, targetUrl.toString()) +
-        errorPage(`Site returned "${ct.split(";")[0]}" — may block proxies`, finalUrl);
-      reply.removeHeader("x-frame-options");
-      reply.removeHeader("content-security-policy");
-      reply.removeHeader("content-encoding");
-      reply.removeHeader("transfer-encoding");
-      return reply.type("text/html").send(errHtml);
+      return reply.redirect("/proxy/fetch?url=" + encodeURIComponent(targetUrl.toString()));
     }
 
     let html = await res.text();
