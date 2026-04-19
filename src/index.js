@@ -450,19 +450,6 @@ fastify.setNotFoundHandler((req, reply) => {
 
 // ── START ─────────────────────────────────────────────────────────────────────
 
-fastify.server.on("listening", () => {
-  const a = fastify.server.address();
-  console.log(`Listening on http://localhost:${a.port}`);
-});
-
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
-function shutdown() { fastify.close(); process.exit(0); }
-
-let port = parseInt(process.env.PORT || "");
-if (isNaN(port)) port = 8080;
-fastify.listen({ port, host: "0.0.0.0" });
-
 // ══════════════════════════════════════════════════════════════════════════════
 //  YOUTUBE / INVIDIOUS API  
 //  Hits Invidious API directly — no proxy needed, CSS works perfectly
