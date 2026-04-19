@@ -40,7 +40,7 @@ function rewriteTargetUrl(url) {
     const u = new URL(url);
     // TikTok → ProxiTok (open source TikTok frontend, proxy-friendly)
     if (u.hostname === "tiktok.com" || u.hostname === "www.tiktok.com") {
-      return "https://proxitok.pabloferreiro.es/";
+      return "https://tok.smahat.cn/";
     }
     // YouTube → Invidious (open source YT frontend, proxy-friendly)
     if (u.hostname === "youtube.com" || u.hostname === "www.youtube.com") {
@@ -198,6 +198,27 @@ function makeInjection(origin, base) {
     }catch(e){}
     return _xo.apply(this,arguments);
   };
+
+  // ── Form submit interceptor — fixes GET forms losing ?url= param ──
+  document.addEventListener('submit',function(e){
+    var form=e.target;
+    if(!form||form.method.toLowerCase()==='post')return;
+    e.preventDefault();
+    var action=form.getAttribute('action')||'';
+    var abs;
+    try{
+      if(action.startsWith('/proxy/')){
+        var match=action.match(/[?&]url=([^&]+)/);
+        abs=match?decodeURIComponent(match[1]):_base;
+      }else{
+        abs=new URL(action||'',_base).toString();
+      }
+    }catch(err){abs=_base;}
+    var params=new URLSearchParams(new FormData(form));
+    var qs=params.toString();
+    var dest=abs+(abs.includes('?')?'&':'?')+qs;
+    top.location.href='/proxy/?url='+encodeURIComponent(dest);
+  },true);
 
   // ── Click interceptor ──
   document.addEventListener('click',function(e){
