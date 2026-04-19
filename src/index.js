@@ -200,10 +200,10 @@ function makeInjection(origin, base) {
   };
 
   // ── Form submit interceptor — fixes GET forms losing ?url= param ──
-  document.addEventListener('submit',function(e){
-    var form=e.target;
-    if(!form||form.method.toLowerCase()==='post')return;
-    e.preventDefault();
+  function handleFormSubmit(form){
+    if(!form)return false;
+    var method=(form.method||'get').toLowerCase();
+    if(method==='post')return false;
     var action=form.getAttribute('action')||'';
     var abs;
     try{
@@ -218,6 +218,19 @@ function makeInjection(origin, base) {
     var qs=params.toString();
     var dest=abs+(abs.includes('?')?'&':'?')+qs;
     top.location.href='/proxy/?url='+encodeURIComponent(dest);
+    return true;
+  }
+  document.addEventListener('submit',function(e){
+    if(handleFormSubmit(e.target))e.preventDefault();
+  },true);
+  // Also catch Enter key in input fields
+  document.addEventListener('keydown',function(e){
+    if(e.key!=='Enter')return;
+    var el=e.target;
+    if(el.tagName==='INPUT'||el.tagName==='TEXTAREA'){
+      var form=el.closest('form');
+      if(form&&handleFormSubmit(form)){e.preventDefault();e.stopPropagation();}
+    }
   },true);
 
   // ── Click interceptor ──
@@ -383,6 +396,60 @@ fastify.get("/proxy/fetch", async (req, reply) => {
   }
 });
 
+// ── TIKTOK API ROUTE ─────────────────────────────────────────────────────────
+// GET /tiktok/feed?token=YOUR_TOKEN — fetches trending videos via TikTok API
+// GET /tiktok/search?token=YOUR_TOKEN&q=query
+
+fastify.get("/tiktok/feed", async (req, reply) => {
+  const token = req.query.token || process.env.TIKTOK_TOKEN;
+  if (!token) return reply.code(400).send({ error: "Missing token" });
+
+  try {
+    const res = await fetch("https://open.tiktokapis.com/v2/video/list/", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + token,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        max_count: 20,
+        fields: "id,title,cover_image_url,video_description,duration,like_count,view_count,share_count,embed_link,embed_html"
+      }),
+    });
+    const data = await res.json();
+    reply.header("access-control-allow-origin", "*");
+    return reply.send(data);
+  } catch (err) {
+    return reply.code(502).send({ error: err.message });
+  }
+});
+
+fastify.get("/tiktok/search", async (req, reply) => {
+  const token = req.query.token || process.env.TIKTOK_TOKEN;
+  const q = req.query.q || "";
+  if (!token) return reply.code(400).send({ error: "Missing token" });
+
+  try {
+    const res = await fetch("https://open.tiktokapis.com/v2/research/video/query/", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + token,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: { and: [{ operation: "IN", field_name: "keyword", field_values: [q] }] },
+        max_count: 20,
+        fields: "id,username,video_description,create_time,like_count,view_count,share_count,embed_link"
+      }),
+    });
+    const data = await res.json();
+    reply.header("access-control-allow-origin", "*");
+    return reply.send(data);
+  } catch (err) {
+    return reply.code(502).send({ error: err.message });
+  }
+});
+
 // ── 404 ───────────────────────────────────────────────────────────────────────
 
 fastify.setNotFoundHandler((req, reply) => {
@@ -403,3 +470,115 @@ function shutdown() { fastify.close(); process.exit(0); }
 let port = parseInt(process.env.PORT || "");
 if (isNaN(port)) port = 8080;
 fastify.listen({ port, host: "0.0.0.0" });
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  TIKTOK API INTEGRATION
+//  Uses Client Credentials flow — token cached in memory
+// ══════════════════════════════════════════════════════════════════════════════
+
+let ttToken = null;
+let ttTokenExpiry = 0;
+
+async function getTikTokToken() {
+  if (ttToken && Date.now() < ttTokenExpiry) return ttToken;
+
+  const key    = process.env.TIKTOK_CLIENT_KEY;
+  const secret = process.env.TIKTOK_CLIENT_SECRET;
+  if (!key || !secret) throw new Error("TikTok credentials not configured");
+
+  const res = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_key: key,
+      client_secret: secret,
+      grant_type: "client_credentials",
+    }),
+  });
+
+  const data = await res.json();
+  if (!data.access_token) throw new Error("Token error: " + JSON.stringify(data));
+
+  ttToken = data.access_token;
+  ttTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+  return ttToken;
+}
+
+// GET /api/tiktok/search?q=query — search TikTok videos
+fastify.get("/api/tiktok/search", async (req, reply) => {
+  reply.header("access-control-allow-origin", "*");
+  const q = (req.query.q || "").trim();
+  if (!q) return reply.send({ videos: [] });
+
+  try {
+    const token = await getTikTokToken();
+    const res = await fetch(
+      "https://open.tiktokapis.com/v2/research/video/query/?fields=id,video_description,create_time,like_count,view_count,share_count,comment_count,music_id,hashtag_names,username,embed_link,cover_image_url",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query: {
+            and: [{ operation: "IN", field_name: "keyword", field_values: [q] }],
+          },
+          max_count: 20,
+          start_date: "20240101",
+          end_date: new Date().toISOString().slice(0,10).replace(/-/g,""),
+        }),
+      }
+    );
+    const data = await res.json();
+    return reply.send(data);
+  } catch (err) {
+    return reply.code(502).send({ error: err.message });
+  }
+});
+
+// GET /api/tiktok/trending — trending videos
+fastify.get("/api/tiktok/trending", async (req, reply) => {
+  reply.header("access-control-allow-origin", "*");
+  try {
+    const token = await getTikTokToken();
+    const res = await fetch(
+      "https://open.tiktokapis.com/v2/research/video/query/?fields=id,video_description,create_time,like_count,view_count,share_count,comment_count,username,embed_link,cover_image_url",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query: {
+            and: [{ operation: "GT", field_name: "like_count", field_values: ["100000"] }],
+          },
+          max_count: 20,
+          start_date: "20240101",
+          end_date: new Date().toISOString().slice(0,10).replace(/-/g,""),
+        }),
+      }
+    );
+    const data = await res.json();
+    return reply.send(data);
+  } catch (err) {
+    return reply.code(502).send({ error: err.message });
+  }
+});
+
+// GET /api/tiktok/embed?id=VIDEO_ID — get embed HTML for a video
+fastify.get("/api/tiktok/embed", async (req, reply) => {
+  reply.header("access-control-allow-origin", "*");
+  const id = req.query.id;
+  if (!id) return reply.code(400).send({ error: "Missing id" });
+  try {
+    const res = await fetch(
+      `https://www.tiktok.com/oembed?url=https://www.tiktok.com/video/${id}`
+    );
+    const data = await res.json();
+    return reply.send(data);
+  } catch (err) {
+    return reply.code(502).send({ error: err.message });
+  }
+});
