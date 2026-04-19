@@ -38,14 +38,13 @@ function getUA(url) {
 function rewriteTargetUrl(url) {
   try {
     const u = new URL(url);
-    // TikTok → lite version
+    // TikTok → ProxiTok (open source TikTok frontend, proxy-friendly)
     if (u.hostname === "tiktok.com" || u.hostname === "www.tiktok.com") {
-      u.hostname = "vm.tiktok.com"; u.pathname = "/";
-      return u.toString();
+      return "https://proxitok.pabloferreiro.es/";
     }
     // YouTube → Invidious (open source YT frontend, proxy-friendly)
     if (u.hostname === "youtube.com" || u.hostname === "www.youtube.com") {
-      u.hostname = "inv.nadeko.net"; // public Invidious instance
+      u.hostname = "yewtu.be"; // public Invidious instance
       return u.toString();
     }
     if (u.hostname === "youtu.be") {
@@ -265,7 +264,8 @@ fastify.get("/proxy/", async (req, reply) => {
   try {
     const res = await doFetch(rewrittenUrl,
       "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      { "Referer": targetUrl.origin + "/", "Origin": targetUrl.origin });
+      { "Referer": targetUrl.origin + "/", "Origin": targetUrl.origin,
+        "Sec-Fetch-Mode": "navigate", "Upgrade-Insecure-Requests": "1" });
 
     const ct = res.headers.get("content-type") || "";
     // Use original target URL as base (not the rewritten one) so links resolve correctly
@@ -318,7 +318,9 @@ fastify.get("/proxy/fetch", async (req, reply) => {
     const res = await fetch(targetUrl.toString(), {
       redirect: "follow",
       headers: {
-        ...FETCH_HEADERS,
+        "User-Agent": getUA(targetUrl.toString()),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
         "Accept": accept,
         "Referer": targetUrl.origin + "/",
         "Origin": targetUrl.origin,
