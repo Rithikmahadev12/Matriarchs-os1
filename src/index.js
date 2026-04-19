@@ -25,21 +25,52 @@ function isBlocked(h) {
   return BLOCKED.has(h) || h.endsWith(".internal") || h.endsWith(".local");
 }
 
-const FETCH_HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Accept-Language": "en-US,en;q=0.9",
-  "Cache-Control": "no-cache",
-  "Pragma": "no-cache",
-};
+const DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const MOBILE_UA  = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
 
-async function doFetch(url, accept) {
+function getUA(url) {
+  const host = new URL(url).hostname;
+  if (host.includes("tiktok") || host.includes("instagram")) return MOBILE_UA;
+  return DESKTOP_UA;
+}
+
+// Rewrite certain hostile URLs to friendlier alternatives
+function rewriteTargetUrl(url) {
+  try {
+    const u = new URL(url);
+    // TikTok → lite version
+    if (u.hostname === "tiktok.com" || u.hostname === "www.tiktok.com") {
+      u.hostname = "lite.tiktok.com";
+      return u.toString();
+    }
+    // YouTube → Invidious (open source YT frontend, proxy-friendly)
+    if (u.hostname === "youtube.com" || u.hostname === "www.youtube.com") {
+      u.hostname = "inv.nadeko.net"; // public Invidious instance
+      return u.toString();
+    }
+    if (u.hostname === "youtu.be") {
+      const videoId = u.pathname.slice(1);
+      return "https://inv.nadeko.net/watch?v=" + videoId;
+    }
+  } catch {}
+  return url;
+}
+
+async function doFetch(url, accept, extraHeaders) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 20000);
   try {
     return await fetch(url, {
       signal: ctrl.signal,
       redirect: "follow",
-      headers: { ...FETCH_HEADERS, "Accept": accept || "*/*" },
+      headers: {
+        "User-Agent": getUA(url),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Accept": accept || "*/*",
+        ...extraHeaders,
+      },
     });
   } finally { clearTimeout(t); }
 }
@@ -47,11 +78,13 @@ async function doFetch(url, accept) {
 // Convert any URL to an absolute URL through our proxy fetch endpoint
 function toFetch(url, base) {
   if (!url) return url;
-  const u = url.trim();
+  let u = url.trim();
   if (!u || u.startsWith("data:") || u.startsWith("#") ||
       u.startsWith("javascript:") || u.startsWith("mailto:") ||
       u.startsWith("blob:") || u.startsWith("about:") ||
       u.startsWith("/proxy/")) return u;
+  // Handle protocol-relative URLs like //cdn.example.com/file.js
+  if (u.startsWith("//")) u = new URL(base).protocol + u;
   try {
     const abs = new URL(u, base).toString();
     return "/proxy/fetch?url=" + encodeURIComponent(abs);
@@ -61,11 +94,13 @@ function toFetch(url, base) {
 // Convert any URL to go through our page proxy
 function toPage(url, base) {
   if (!url) return url;
-  const u = url.trim();
+  let u = url.trim();
   if (!u || u.startsWith("data:") || u.startsWith("#") ||
       u.startsWith("javascript:") || u.startsWith("mailto:") ||
       u.startsWith("blob:") || u.startsWith("about:") ||
       u.startsWith("/proxy/")) return u;
+  // Handle protocol-relative URLs
+  if (u.startsWith("//")) u = new URL(base).protocol + u;
   try {
     const abs = new URL(u, base).toString();
     return "/proxy/?url=" + encodeURIComponent(abs);
@@ -226,12 +261,17 @@ fastify.get("/proxy/", async (req, reply) => {
   catch { return reply.code(400).send("Invalid URL"); }
   if (isBlocked(targetUrl.hostname)) return reply.code(403).send("Blocked");
 
+  // Rewrite hostile URLs to friendlier alternatives
+  const rewrittenUrl = rewriteTargetUrl(targetUrl.toString());
+
   try {
-    const res = await doFetch(targetUrl.toString(),
-      "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+    const res = await doFetch(rewrittenUrl,
+      "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      { "Referer": targetUrl.origin + "/", "Origin": targetUrl.origin });
 
     const ct = res.headers.get("content-type") || "";
-    const finalUrl = res.url || targetUrl.toString();
+    // Use original target URL as base (not the rewritten one) so links resolve correctly
+    const finalUrl = targetUrl.toString();
 
     // Not HTML? Show error with injection so links still proxy
     if (ct && !ct.includes("text/html") && !ct.includes("xhtml") && ct !== "") {
