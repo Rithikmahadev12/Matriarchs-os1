@@ -1157,7 +1157,7 @@ function openYouTube() {
 }
 
 // ══════════════════════════════════════
-//  TIKTOK APP
+//  TIKTOK APP — ProxiTok iframe
 // ══════════════════════════════════════
 
 function openTikTok() {
@@ -1167,7 +1167,7 @@ function openTikTok() {
   const win = document.createElement("div");
   win.className = "window";
   win.id = "win-tiktok";
-  win.style.cssText = "top:60px;left:100px;width:680px;height:520px";
+  win.style.cssText = "top:60px;left:100px;width:780px;height:560px";
 
   win.innerHTML = `
     <div class="window-titlebar">
@@ -1179,19 +1179,25 @@ function openTikTok() {
       <span class="window-title">TIKTOK</span>
     </div>
     <div class="window-body" style="flex-direction:column;overflow:hidden;background:#000;padding:0">
-      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#111;border-bottom:1px solid rgba(255,255,255,0.08);flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#111;border-bottom:1px solid rgba(255,255,255,0.08);flex-shrink:0">
         <input id="tt-search" type="text" placeholder="Search TikTok…"
           style="flex:1;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);
           color:#fff;font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:4px;outline:none"
           autocomplete="off" spellcheck="false"/>
         <button id="tt-go" style="background:#fe2c55;border:none;color:#fff;font-family:var(--mono);
-          font-size:11px;padding:6px 14px;border-radius:4px;cursor:pointer">GO</button>
+          font-size:11px;padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:bold">GO</button>
         <button id="tt-trending" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);
           color:#aaa;font-family:var(--mono);font-size:11px;padding:6px 12px;border-radius:4px;cursor:pointer">TRENDING</button>
+        <button id="tt-home" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);
+          color:#aaa;font-family:var(--mono);font-size:11px;padding:6px 12px;border-radius:4px;cursor:pointer">HOME</button>
       </div>
-      <div id="tt-status" style="color:#aaa;font-family:var(--mono);font-size:11px;padding:8px 14px;display:none;flex-shrink:0"></div>
-      <div id="tt-grid" style="flex:1;overflow-y:auto;padding:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px"></div>
-      <div id="tt-player" style="flex:1;overflow:hidden;display:none;background:#000"></div>
+      <div id="tt-status" style="color:#aaa;font-family:var(--mono);font-size:11px;padding:6px 12px;display:none;flex-shrink:0;background:#0a0a0a"></div>
+      <div id="tt-frame-wrap" style="flex:1;overflow:hidden;position:relative">
+        <div id="tt-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:2;flex-direction:column;gap:12px">
+          <div style="color:#fe2c55;font-size:28px">⬡</div>
+          <div style="color:#aaa;font-family:var(--mono);font-size:11px">Loading TikTok…</div>
+        </div>
+      </div>
     </div>
   `;
 
@@ -1204,109 +1210,66 @@ function openTikTok() {
   const searchEl  = win.querySelector("#tt-search");
   const goBtn     = win.querySelector("#tt-go");
   const trendBtn  = win.querySelector("#tt-trending");
-  const grid      = win.querySelector("#tt-grid");
-  const player    = win.querySelector("#tt-player");
+  const homeBtn   = win.querySelector("#tt-home");
+  const frameWrap = win.querySelector("#tt-frame-wrap");
+  const loading   = win.querySelector("#tt-loading");
   const status    = win.querySelector("#tt-status");
 
-  function showStatus(msg) {
-    status.style.display = "block";
-    status.textContent = msg;
-  }
+  function showStatus(msg) { status.style.display = "block"; status.textContent = msg; }
   function hideStatus() { status.style.display = "none"; }
 
-  function renderVideos(data) {
-    grid.style.display = "grid";
-    player.style.display = "none";
-    grid.innerHTML = "";
-
-    const videos = data?.data?.videos || [];
-    if (!videos.length) {
-      grid.innerHTML = `<div style="grid-column:1/-1;color:#555;font-family:var(--mono);font-size:12px;padding:40px;text-align:center">
-        No videos found — try a different search term.<br><br>
-        <span style="font-size:10px;color:#333">Note: Research API requires approved access</span>
-      </div>`;
-      return;
-    }
-
-    videos.forEach(v => {
-      const card = document.createElement("div");
-      card.style.cssText = "background:#111;border-radius:8px;overflow:hidden;cursor:pointer;border:1px solid rgba(255,255,255,0.06)";
-      card.innerHTML = `
-        <div style="aspect-ratio:9/16;background:#1a1a1a;display:flex;align-items:center;justify-content:center;font-size:28px;position:relative">
-          ${v.cover_image_url
-            ? `<img src="${v.cover_image_url}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none'">`
-            : "🎵"}
-          <div style="position:absolute;bottom:6px;right:6px;background:rgba(0,0,0,0.7);color:#fff;font-size:9px;font-family:var(--mono);padding:2px 6px;border-radius:3px">
-            ${v.like_count ? "♥ " + (v.like_count > 999 ? (v.like_count/1000).toFixed(1)+"K" : v.like_count) : ""}
-          </div>
-        </div>
-        <div style="padding:8px">
-          <div style="color:#fff;font-size:10px;font-family:var(--mono);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">
-            ${(v.video_description || "").slice(0,80) || "No description"}
-          </div>
-          <div style="color:#555;font-size:9px;font-family:var(--mono);margin-top:4px">@${v.username || "unknown"}</div>
-        </div>
-      `;
-      card.addEventListener("click", () => openVideo(v));
-      grid.appendChild(card);
-    });
+  function loadUrl(proxiedUrl) {
+    loading.style.display = "flex";
+    // Remove old iframe
+    const old = frameWrap.querySelector("iframe");
+    if (old) old.remove();
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "width:100%;height:100%;border:none;background:#fff";
+    iframe.sandbox = "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
+    iframe.src = proxiedUrl;
+    iframe.onload = () => { loading.style.display = "none"; hideStatus(); };
+    frameWrap.appendChild(iframe);
   }
 
-  function openVideo(v) {
-    if (v.embed_link) {
-      grid.style.display = "none";
-      player.style.display = "flex";
-      player.style.flexDirection = "column";
-      player.innerHTML = `
-        <div style="padding:8px 12px;background:#111;display:flex;align-items:center;gap:8px;flex-shrink:0">
-          <button onclick="document.getElementById('tt-grid').style.display='grid';document.getElementById('tt-player').style.display='none'"
-            style="background:rgba(255,255,255,0.1);border:none;color:#fff;font-family:var(--mono);font-size:10px;padding:4px 10px;border-radius:3px;cursor:pointer">← Back</button>
-          <span style="color:#aaa;font-family:var(--mono);font-size:10px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${(v.video_description||"").slice(0,60)}</span>
-        </div>
-        <iframe src="${v.embed_link}" style="flex:1;border:none;width:100%" allowfullscreen allow="autoplay"></iframe>
-      `;
-    } else {
-      showStatus("No embed available for this video. Try another.");
-      setTimeout(hideStatus, 3000);
-    }
+  async function loadTrending() {
+    showStatus("Finding live TikTok instance…");
+    try {
+      const res = await fetch("/api/tiktok/trending-url");
+      const data = await res.json();
+      hideStatus();
+      loadUrl(data.proxied);
+    } catch(e) { showStatus("Error: " + e.message); }
   }
 
-  async function doSearch(q) {
+  async function loadSearch(q) {
+    if (!q.trim()) return;
     showStatus("Searching…");
-    grid.innerHTML = "";
     try {
-      const res  = await fetch("/api/tiktok/search?q=" + encodeURIComponent(q));
+      const res = await fetch("/api/tiktok/search-url?q=" + encodeURIComponent(q));
       const data = await res.json();
       hideStatus();
-      if (data.error) { showStatus("Error: " + data.error); return; }
-      renderVideos(data);
-    } catch (err) {
-      showStatus("Error: " + err.message);
-    }
+      loadUrl(data.proxied);
+    } catch(e) { showStatus("Error: " + e.message); }
   }
 
-  async function doTrending() {
-    showStatus("Loading trending…");
-    grid.innerHTML = "";
+  async function loadHome() {
+    showStatus("Loading…");
     try {
-      const res  = await fetch("/api/tiktok/trending");
+      const res = await fetch("/api/tiktok/instance");
       const data = await res.json();
       hideStatus();
-      if (data.error) { showStatus("Error: " + data.error); return; }
-      renderVideos(data);
-    } catch (err) {
-      showStatus("Error: " + err.message);
-    }
+      loadUrl(data.proxied);
+    } catch(e) { showStatus("Error: " + e.message); }
   }
 
-  goBtn.addEventListener("click", () => { if (searchEl.value.trim()) doSearch(searchEl.value.trim()); });
-  searchEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && searchEl.value.trim()) doSearch(searchEl.value.trim()); });
-  trendBtn.addEventListener("click", doTrending);
+  goBtn.addEventListener("click", () => loadSearch(searchEl.value));
+  searchEl.addEventListener("keydown", e => { if (e.key === "Enter") loadSearch(searchEl.value); });
+  trendBtn.addEventListener("click", loadTrending);
+  homeBtn.addEventListener("click", loadHome);
 
   // Load trending on open
-  doTrending();
+  loadTrending();
 }
-
 // ══════════════════════════════════════
 //  ABOUT WINDOW
 // ══════════════════════════════════════
