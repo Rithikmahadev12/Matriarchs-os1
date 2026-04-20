@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { fileURLToPath } from "url";
+import { hostname } from "node:os";
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 
@@ -35,7 +36,7 @@ function getUA(url) {
   return DESKTOP_UA;
 }
 
-async function doFetch(url, accept, extra = {}) {
+async function doFetch(url, accept, extra) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 20000);
   try {
@@ -83,8 +84,10 @@ function rewriteCss(css, base) {
 }
 
 function rewriteHtml(html, base) {
+  // Remove CSP
   html = html.replace(/<meta[^>]+http-equiv=["']Content-Security-Policy["'][^>]*\/?>/gi, "");
 
+  // <link> tags — stylesheets to fetch proxy, nav links to page proxy
   html = html.replace(/<link(\s[^>]*)>/gi, (tag, attrs) => {
     const isStyle = /rel=["'][^"']*\b(stylesheet|preload)\b[^"']*["']/i.test(attrs);
     attrs = attrs.replace(/\shref\s*=\s*(["'])([^"']+)\1/gi, (m, q, url) => {
@@ -94,18 +97,22 @@ function rewriteHtml(html, base) {
     return `<link${attrs}>`;
   });
 
+  // src= attributes
   html = html.replace(/\bsrc\s*=\s*(["'])(.*?)\1/gi, (m, q, url) =>
     url ? `src=${q}${toFetch(url, base)}${q}` : m);
 
+  // href= on non-link tags
   html = html.replace(/(<(?!link\b)[a-z][^>]*?)\shref\s*=\s*(["'])([^"']+)\2/gi, (m, pre, q, url) => {
     if (!url || url.startsWith("data:") || url.startsWith("#") || url.startsWith("javascript:") ||
         url.startsWith("mailto:") || url.startsWith("/proxy/")) return m;
     return `${pre} href=${q}${toPage(url, base)}${q}`;
   });
 
+  // action= forms
   html = html.replace(/\baction\s*=\s*(["'])(.*?)\1/gi, (m, q, url) =>
     url ? `action=${q}${toPage(url, base)}${q}` : m);
 
+  // srcset=
   html = html.replace(/\bsrcset\s*=\s*(["'])(.*?)\1/gi, (m, q, srcset) => {
     const rw = srcset.split(",").map(part => {
       const t = part.trim(), si = t.search(/\s/);
@@ -114,9 +121,11 @@ function rewriteHtml(html, base) {
     return `srcset=${q}${rw}${q}`;
   });
 
+  // <style> blocks
   html = html.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/gi,
     (m, o, css, c) => o + rewriteCss(css, base) + c);
 
+  // inline style=
   html = html.replace(/\bstyle\s*=\s*(["'])(.*?)\1/gi,
     (m, q, css) => `style=${q}${rewriteCss(css, base)}${q}`);
 
@@ -127,6 +136,7 @@ function makeInjection(origin, base) {
   return `<script>
 (function(){
   var _b=${JSON.stringify(base)},_lo=location.origin;
+  // Form submit interceptor
   document.addEventListener('submit',function(e){
     var f=e.target;
     if(!f||(f.method||'get').toLowerCase()==='post')return;
@@ -140,6 +150,7 @@ function makeInjection(origin, base) {
     var qs=new URLSearchParams(new FormData(f)).toString();
     top.location.href='/proxy/?url='+encodeURIComponent(abs+(abs.includes('?')?'&':'?')+qs);
   },true);
+  // Enter key in inputs
   document.addEventListener('keydown',function(e){
     if(e.key!=='Enter')return;
     var el=e.target;
@@ -158,6 +169,7 @@ function makeInjection(origin, base) {
       }
     }
   },true);
+  // Click interceptor
   document.addEventListener('click',function(e){
     var el=e.target;
     while(el&&el.tagName!=='A')el=el.parentElement;
@@ -166,6 +178,7 @@ function makeInjection(origin, base) {
     if(!href||href.startsWith('#')||href.startsWith('javascript:')||href.startsWith('mailto:')||href.startsWith('blob:')||href.indexOf('/proxy/')!==-1)return;
     try{var u=new URL(href);if(u.origin===_lo)return;e.preventDefault();e.stopPropagation();top.location.href='/proxy/?url='+encodeURIComponent(u.toString());}catch(err){}
   },true);
+  // fetch hook
   var _f=window.fetch;
   window.fetch=function(input,init){
     try{
@@ -177,6 +190,7 @@ function makeInjection(origin, base) {
     }catch(e){}
     return _f(input,init);
   };
+  // XHR hook
   var _xo=XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open=function(m,url){
     try{
@@ -187,6 +201,7 @@ function makeInjection(origin, base) {
     }catch(e){}
     return _xo.apply(this,arguments);
   };
+  // history hook
   var _pp=history.pushState,_rp=history.replaceState;
   history.pushState=function(s,t,url){_pp.apply(this,arguments);try{top.postMessage({type:'mos-nav',url:new URL(url||'',_b).toString()},'*');}catch(e){}};
   history.replaceState=function(s,t,url){_rp.apply(this,arguments);try{top.postMessage({type:'mos-nav',url:new URL(url||'',_b).toString()},'*');}catch(e){}};
@@ -242,13 +257,6 @@ fastify.get("/proxy/", async (req, reply) => {
 
 // ── PROXY FETCH ───────────────────────────────────────────────────────────────
 
-fastify.options("/proxy/fetch", async (req, reply) => {
-  reply.header("access-control-allow-origin", "*");
-  reply.header("access-control-allow-headers", "*");
-  reply.header("access-control-allow-methods", "GET, OPTIONS");
-  reply.code(204).send();
-});
-
 fastify.get("/proxy/fetch", async (req, reply) => {
   const target = req.query.url;
   if (!target) return reply.code(400).send("Missing ?url=");
@@ -276,14 +284,10 @@ fastify.get("/proxy/fetch", async (req, reply) => {
     reply.removeHeader("content-security-policy");
     reply.removeHeader("content-encoding");
     reply.removeHeader("transfer-encoding");
-    reply.removeHeader("x-content-type-options");
     reply.header("content-type", ct);
     reply.header("access-control-allow-origin", "*");
     reply.header("access-control-allow-headers", "*");
-    reply.header("access-control-allow-methods", "*");
     reply.header("cross-origin-resource-policy", "cross-origin");
-    reply.header("cross-origin-embedder-policy", "unsafe-none");
-    reply.header("timing-allow-origin", "*");
 
     if (ct.includes("text/css") || url.match(/\.css(\?|$)/i)) {
       return reply.send(rewriteCss(await res.text(), url));
@@ -296,187 +300,6 @@ fastify.get("/proxy/fetch", async (req, reply) => {
     console.error("Fetch proxy error:", err.message);
     return reply.code(502).send("Proxy error: " + err.message);
   }
-});
-
-// ── YOUTUBE API ───────────────────────────────────────────────────────────────
-
-const INVIDIOUS_INSTANCES = [
-  "https://invidious.privacyredirect.com",
-  "https://invidious.nerdvpn.de",
-  "https://inv.nadeko.net",
-  "https://invidious.io.lol",
-  "https://invidious.fdn.fr",
-];
-
-async function invidiousFetch(path) {
-  for (const base of INVIDIOUS_INSTANCES) {
-    try {
-      const res = await doFetch(`${base}${path}`, "application/json", { "Referer": base + "/" });
-      const text = await res.text();
-      if (!text || text.trim().startsWith("<")) continue;
-      const data = JSON.parse(text);
-      if (data && !data.error) return data;
-    } catch(e) { /* try next */ }
-  }
-  return null;
-}
-
-fastify.get("/api/youtube/search", async (req, reply) => {
-  const q = req.query.q || "";
-  if (!q.trim()) return reply.send({ results: [] });
-  try {
-    const data = await invidiousFetch(`/api/v1/search?q=${encodeURIComponent(q)}&type=video&page=1`);
-    if (!data || !Array.isArray(data)) return reply.send({ error: "No results" });
-    reply.send({ results: data.filter(v => v.type === "video").map(v => ({
-      videoId: v.videoId, title: v.title, author: v.author,
-      viewCount: v.viewCount, lengthSeconds: v.lengthSeconds,
-      videoThumbnails: v.videoThumbnails || [],
-    }))});
-  } catch(err) { reply.send({ error: err.message }); }
-});
-
-fastify.get("/api/youtube/trending", async (req, reply) => {
-  try {
-    const data = await invidiousFetch(`/api/v1/trending?type=default&region=US`);
-    if (!data || !Array.isArray(data)) return reply.send({ error: "No results" });
-    reply.send({ results: data.map(v => ({
-      videoId: v.videoId, title: v.title, author: v.author,
-      viewCount: v.viewCount, lengthSeconds: v.lengthSeconds,
-      videoThumbnails: v.videoThumbnails || [],
-    }))});
-  } catch(err) { reply.send({ error: err.message }); }
-});
-
-// ── TIKTOK — ProxiTok via proxy iframe ───────────────────────────────────────
-// We don't scrape TikTok directly (always blocked server-side).
-// Instead we find a live ProxiTok instance and load it through our own proxy.
-// The frontend TikTok app becomes an iframe pointing at /proxy/?url=<proxitok>
-
-const PROXITOK_INSTANCES = [
-  "https://proxitok.pabloferreiro.es",
-  "https://proxitok.pussthecat.org",
-  "https://tok.habedieeh.re",
-  "https://proxitok.privacydev.net",
-  "https://tok.artemislena.eu",
-  "https://tok.adminforge.de",
-  "https://cringe.whatever.social",
-  "https://proxitok.lunar.icu",
-  "https://proxitok.privacy.com.de",
-  "https://tt.opnxng.com",
-  "https://proxitok.r4fo.com",
-];
-
-let cachedInstance = null;
-let cachedAt = 0;
-const CACHE_TTL = 5 * 60 * 1000;
-
-async function getWorkingProxiTok() {
-  if (cachedInstance && (Date.now() - cachedAt) < CACHE_TTL) return cachedInstance;
-  for (const base of PROXITOK_INSTANCES) {
-    try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 4000);
-      const res = await fetch(base + "/", { signal: ctrl.signal, redirect: "follow" });
-      clearTimeout(t);
-      if (res.status < 500) {
-        cachedInstance = base;
-        cachedAt = Date.now();
-        console.log("ProxiTok instance:", base);
-        return base;
-      }
-    } catch(e) { /* try next */ }
-  }
-  // Return first as last resort
-  return PROXITOK_INSTANCES[0];
-}
-
-// Returns proxied URLs the frontend iframe should load
-fastify.get("/api/tiktok/instance", async (req, reply) => {
-  const instance = await getWorkingProxiTok();
-  reply.send({
-    instance,
-    proxied: "/proxy/?url=" + encodeURIComponent(instance + "/"),
-  });
-});
-
-fastify.get("/api/tiktok/trending-url", async (req, reply) => {
-  const instance = await getWorkingProxiTok();
-  reply.send({ proxied: "/proxy/?url=" + encodeURIComponent(instance + "/trending") });
-});
-
-fastify.get("/api/tiktok/search-url", async (req, reply) => {
-  const q = req.query.q || "";
-  const instance = await getWorkingProxiTok();
-  reply.send({ proxied: "/proxy/?url=" + encodeURIComponent(instance + "/search/videos?q=" + encodeURIComponent(q)) });
-});
-
-// ── SEARCH API ────────────────────────────────────────────────────────────────
-
-function parseDDG(html) {
-  const results = [];
-  const blockRe = /<div[^>]+class="[^"]*result[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi;
-  const titleLinkRe = /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i;
-  const snippetRe = /<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/i;
-  let block;
-  while ((block = blockRe.exec(html)) !== null && results.length < 10) {
-    const content = block[1];
-    const tl = titleLinkRe.exec(content);
-    if (!tl) continue;
-    let url = tl[1];
-    const title = tl[2].replace(/<[^>]+>/g, "").trim();
-    try {
-      const u = new URL(url.startsWith("//") ? "https:" + url : url);
-      url = u.searchParams.get("uddg") || decodeURIComponent(u.searchParams.get("u") || url);
-    } catch {}
-    if (!url || url.includes("duckduckgo.com")) continue;
-    const snip = snippetRe.exec(content);
-    results.push({ title, url, snippet: snip ? snip[1].replace(/<[^>]+>/g, "").trim() : "" });
-  }
-  return results;
-}
-
-function parseBing(html) {
-  const results = [];
-  const re = /<li[^>]+class="[^"]*b_algo[^"]*"[^>]*>([\s\S]*?)<\/li>/gi;
-  const titleRe = /<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i;
-  const snippetRe = /<p[^>]*>([\s\S]*?)<\/p>/i;
-  let m;
-  while ((m = re.exec(html)) !== null && results.length < 10) {
-    const t = titleRe.exec(m[1]);
-    if (!t) continue;
-    const s = snippetRe.exec(m[1]);
-    const url = t[1];
-    if (url && !url.startsWith("javascript:"))
-      results.push({ title: t[2].replace(/<[^>]+>/g,"").trim(), url, snippet: s ? s[1].replace(/<[^>]+>/g,"").trim() : "" });
-  }
-  return results;
-}
-
-fastify.get("/api/search", async (req, reply) => {
-  const q = req.query.q || "";
-  if (!q.trim()) return reply.send({ results: [] });
-
-  for (const [fetchUrl, parser, extraHeaders] of [
-    [
-      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`,
-      parseDDG,
-      { "Referer": "https://duckduckgo.com/", "Accept-Encoding": "identity" },
-    ],
-    [
-      `https://www.bing.com/search?q=${encodeURIComponent(q)}&form=QBLH`,
-      parseBing,
-      { "Referer": "https://www.bing.com/" },
-    ],
-  ]) {
-    try {
-      const res = await doFetch(fetchUrl, "text/html,*/*", extraHeaders);
-      const html = await res.text();
-      const results = parser(html);
-      if (results.length) return reply.send({ results });
-    } catch(e) { /* try next */ }
-  }
-
-  reply.send({ results: [], error: "No results found" });
 });
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
