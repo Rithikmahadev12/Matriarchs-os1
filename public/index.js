@@ -762,20 +762,17 @@ document.addEventListener("click",(e)=>{
 //  BROWSER WINDOW — Custom Proxy
 // ══════════════════════════════════════
 
-// FIX B — switched to server-rendered engines: DDG HTML (default) and Bing Lite
-// Both work through a proxy without needing JS rendering or session cookies
 const SEARCH_ENGINES = {
-  ddg_html:  { label: "DDG",        url: "https://html.duckduckgo.com/html/?q=%s" },  // server-rendered, always works
-  bing_lite: { label: "Bing",       url: "https://lite.bing.com/search?q=%s" },       // lite mode, no JS required
   brave:     { label: "Brave",      url: "https://search.brave.com/search?q=%s" },
   ddg:       { label: "DuckDuckGo", url: "https://duckduckgo.com/?q=%s" },
   google:    { label: "Google",     url: "https://www.google.com/search?q=%s" },
+  bing:      { label: "Bing",       url: "https://www.bing.com/search?q=%s" },
   startpage: { label: "Startpage",  url: "https://www.startpage.com/search?q=%s" },
 };
 
-let currentEngine = localStorage.getItem("mos_engine") || "ddg_html";
+let currentEngine = localStorage.getItem("mos_engine") || "ddg";
 function getSearchUrl(q) {
-  const e = SEARCH_ENGINES[currentEngine] || SEARCH_ENGINES.ddg_html;
+  const e = SEARCH_ENGINES[currentEngine] || SEARCH_ENGINES.ddg;
   return e.url.replace("%s", encodeURIComponent(q));
 }
 
@@ -805,7 +802,7 @@ function openBrowser() {
     picker.style.cssText = "position:relative;display:flex;align-items:center;flex-shrink:0";
     const btn = document.createElement("button");
     btn.style.cssText = "background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:var(--text-dim);font-family:var(--mono);font-size:10px;padding:4px 8px;border-radius:4px;cursor:pointer;white-space:nowrap;margin-right:6px;letter-spacing:0.04em;";
-    btn.textContent = SEARCH_ENGINES[currentEngine]?.label || "DDG";
+    btn.textContent = SEARCH_ENGINES[currentEngine]?.label || "Brave";
     const drop = document.createElement("div");
     drop.style.cssText = "display:none;position:absolute;top:calc(100% + 6px);left:0;background:#0d1a10;border:1px solid rgba(255,255,255,0.12);border-radius:6px;overflow:hidden;z-index:9999;min-width:130px;box-shadow:0 8px 24px rgba(0,0,0,0.5);";
     Object.entries(SEARCH_ENGINES).forEach(([key, eng]) => {
@@ -832,13 +829,7 @@ function openBrowser() {
 
   let navHistory=[], navIdx=-1;
 
-  // FIX C — address bar focus guard: prevents the iframe load event from
-  // overwriting text the user is actively typing in the address bar
-  let addrFocused = false;
-  addrEl.addEventListener("focus", () => { addrFocused = true; });
-  addrEl.addEventListener("blur",  () => { addrFocused = false; });
-
-  function navigate(rawUrl) {
+  function navigate(rawUrl, force=false) {
     if (!rawUrl||!rawUrl.trim()) return;
     try { if(errorEl) errorEl.textContent=""; } catch(e){}
     try { if(errCodeEl) errCodeEl.textContent=""; } catch(e){}
@@ -846,13 +837,12 @@ function openBrowser() {
     if (!url.startsWith("http://")&&!url.startsWith("https://")) {
       url=(url.includes(" ")||!url.includes(".")) ? getSearchUrl(url) : "https://"+url;
     }
-    // FIX C — cache-bust with &_t=Date.now() so the same URL always triggers a fresh load
-    const proxyUrl="/proxy/?url="+encodeURIComponent(url)+"&_t="+Date.now();
+    const proxyUrl="/proxy/?url="+encodeURIComponent(url);
+    // Always tear down and recreate iframe — most reliable approach
     frameWrap.innerHTML="";
     const iframe=document.createElement("iframe");
     iframe.style.cssText="width:100%;height:100%;border:none;background:#fff";
-    // FIX C — added allow-top-navigation so in-page links navigate the full frame
-    iframe.sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation";
+    iframe.sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
     iframe.src=proxyUrl;
     frameWrap.appendChild(iframe);
     addrEl.value=url;
@@ -871,12 +861,13 @@ function openBrowser() {
   goBtn.addEventListener("click", () => {
     const typed = addrEl.value.trim();
     if (!typed) return;
-    navigate(typed);
+    // Always force navigate even if same URL
+    navigate(typed, true);
   });
   addrEl.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       const typed = addrEl.value.trim();
-      if (typed) navigate(typed);
+      if (typed) navigate(typed, true);
     }
   });
   document.getElementById("sj-back")?.addEventListener("click", () => {
@@ -906,9 +897,9 @@ function openBrowser() {
     }
   });
 
-  // FIX C — guard with !addrFocused so typing in the address bar isn't overwritten
+  // Update address bar when iframe navigates (via load event or postMessage)
   frameWrap.addEventListener("load", (e) => {
-    if (e.target.tagName === "IFRAME" && !addrFocused) {
+    if (e.target.tagName === "IFRAME") {
       try {
         const src = e.target.src || "";
         const match = src.match(/[?&]url=([^&]+)/);
@@ -921,11 +912,6 @@ function openBrowser() {
   window.addEventListener("message", (e) => {
     if (e.data && e.data.type === "mos-nav" && e.data.url) {
       addrEl.value = e.data.url;
-      // FIX C — keep navHistory in sync when pushState fires inside the iframe
-      navHistory = navHistory.slice(0, navIdx + 1);
-      navHistory.push(e.data.url);
-      navIdx = navHistory.length - 1;
-      updateNavBtns();
     }
   });
 
