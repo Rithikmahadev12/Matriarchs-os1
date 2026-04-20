@@ -861,7 +861,6 @@ function openBrowser() {
   goBtn.addEventListener("click", () => {
     const typed = addrEl.value.trim();
     if (!typed) return;
-    // Always force navigate even if same URL
     navigate(typed, true);
   });
   addrEl.addEventListener("keydown", (e) => {
