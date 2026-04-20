@@ -842,9 +842,7 @@ function openBrowser() {
     frameWrap.innerHTML="";
     const iframe=document.createElement("iframe");
     iframe.style.cssText="width:100%;height:100%;border:none;background:#fff";
-    // Expanded sandbox: allow-top-navigation needed for TikTok's internal routing
-    iframe.sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-downloads allow-modals";
-    iframe.setAttribute("allow", "autoplay; fullscreen; encrypted-media");
+    iframe.sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
     iframe.src=proxyUrl;
     frameWrap.appendChild(iframe);
     addrEl.value=url;
