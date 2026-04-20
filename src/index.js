@@ -257,6 +257,14 @@ fastify.get("/proxy/", async (req, reply) => {
 
 // ── PROXY FETCH ───────────────────────────────────────────────────────────────
 
+// OPTIONS preflight for CORS
+fastify.options("/proxy/fetch", async (req, reply) => {
+  reply.header("access-control-allow-origin", "*");
+  reply.header("access-control-allow-headers", "*");
+  reply.header("access-control-allow-methods", "GET, OPTIONS");
+  reply.code(204).send();
+});
+
 fastify.get("/proxy/fetch", async (req, reply) => {
   const target = req.query.url;
   if (!target) return reply.code(400).send("Missing ?url=");
@@ -284,10 +292,14 @@ fastify.get("/proxy/fetch", async (req, reply) => {
     reply.removeHeader("content-security-policy");
     reply.removeHeader("content-encoding");
     reply.removeHeader("transfer-encoding");
+    reply.removeHeader("x-content-type-options");
     reply.header("content-type", ct);
     reply.header("access-control-allow-origin", "*");
     reply.header("access-control-allow-headers", "*");
+    reply.header("access-control-allow-methods", "*");
     reply.header("cross-origin-resource-policy", "cross-origin");
+    reply.header("cross-origin-embedder-policy", "unsafe-none");
+    reply.header("timing-allow-origin", "*");
 
     if (ct.includes("text/css") || url.match(/\.css(\?|$)/i)) {
       return reply.send(rewriteCss(await res.text(), url));
@@ -299,6 +311,230 @@ fastify.get("/proxy/fetch", async (req, reply) => {
   } catch (err) {
     console.error("Fetch proxy error:", err.message);
     return reply.code(502).send("Proxy error: " + err.message);
+  }
+});
+
+// ── YOUTUBE API ───────────────────────────────────────────────────────────────
+
+fastify.get("/api/youtube/search", async (req, reply) => {
+  const q = req.query.q || "";
+  if (!q.trim()) return reply.send({ results: [] });
+  try {
+    // Use Invidious public instance
+    const instances = [
+      "https://invidious.privacyredirect.com",
+      "https://invidious.nerdvpn.de",
+      "https://inv.nadeko.net",
+    ];
+    let data = null;
+    let lastErr = "";
+    for (const base of instances) {
+      try {
+        const res = await doFetch(
+          `${base}/api/v1/search?q=${encodeURIComponent(q)}&type=video&page=1`,
+          "application/json",
+          { "Referer": base + "/" }
+        );
+        const text = await res.text();
+        data = JSON.parse(text);
+        if (Array.isArray(data)) break;
+        data = null;
+      } catch(e) { lastErr = e.message; }
+    }
+    if (!data) return reply.send({ error: "All Invidious instances failed: " + lastErr });
+    const results = data
+      .filter(v => v.type === "video")
+      .map(v => ({
+        videoId:          v.videoId,
+        title:            v.title,
+        author:           v.author,
+        viewCount:        v.viewCount,
+        lengthSeconds:    v.lengthSeconds,
+        videoThumbnails:  v.videoThumbnails || [],
+      }));
+    reply.send({ results });
+  } catch(err) {
+    console.error("YouTube search error:", err.message);
+    reply.send({ error: err.message });
+  }
+});
+
+fastify.get("/api/youtube/trending", async (req, reply) => {
+  try {
+    const instances = [
+      "https://invidious.privacyredirect.com",
+      "https://invidious.nerdvpn.de",
+      "https://inv.nadeko.net",
+    ];
+    let data = null;
+    let lastErr = "";
+    for (const base of instances) {
+      try {
+        const res = await doFetch(
+          `${base}/api/v1/trending?type=default&region=US`,
+          "application/json",
+          { "Referer": base + "/" }
+        );
+        const text = await res.text();
+        data = JSON.parse(text);
+        if (Array.isArray(data)) break;
+        data = null;
+      } catch(e) { lastErr = e.message; }
+    }
+    if (!data) return reply.send({ error: "All Invidious instances failed: " + lastErr });
+    const results = data.map(v => ({
+      videoId:         v.videoId,
+      title:           v.title,
+      author:          v.author,
+      viewCount:       v.viewCount,
+      lengthSeconds:   v.lengthSeconds,
+      videoThumbnails: v.videoThumbnails || [],
+    }));
+    reply.send({ results });
+  } catch(err) {
+    console.error("YouTube trending error:", err.message);
+    reply.send({ error: err.message });
+  }
+});
+
+// ── TIKTOK API ────────────────────────────────────────────────────────────────
+
+// Helper: try multiple ProxiTok instances
+async function fetchProxiTok(path) {
+  const instances = [
+    "https://proxitok.pabloferreiro.es",
+    "https://proxitok.privacyredirect.com",
+    "https://tok.yields.org",
+  ];
+  let lastErr = "";
+  for (const base of instances) {
+    try {
+      const res = await doFetch(
+        `${base}${path}`,
+        "application/json",
+        { "Referer": base + "/", "Accept": "application/json" }
+      );
+      const text = await res.text();
+      // ProxiTok sometimes returns HTML for errors
+      if (text.trim().startsWith("<")) continue;
+      const data = JSON.parse(text);
+      return { data, error: null };
+    } catch(e) { lastErr = e.message; }
+  }
+  return { data: null, error: lastErr };
+}
+
+function normalizeTikTokItem(v) {
+  // Handle both ProxiTok and raw TikTok API shapes
+  return {
+    videoId:           v.id || v.videoId || "",
+    video_description: v.desc || v.title || v.video_description || "",
+    username:          v.author?.uniqueId || v.author?.nickname || v.username || "",
+    like_count:        v.stats?.diggCount || v.like_count || 0,
+    view_count:        v.stats?.playCount || v.view_count || 0,
+    cover_image_url:   v.video?.cover || v.video?.dynamicCover || v.cover_image_url || "",
+    embed_link:        v.id ? `https://www.tiktok.com/embed/v2/${v.id}` : (v.embed_link || ""),
+  };
+}
+
+fastify.get("/api/tiktok/trending", async (req, reply) => {
+  // Try ProxiTok first
+  const { data: proxiData, error: proxiErr } = await fetchProxiTok("/api/trending?cursor=0&count=20");
+  if (proxiData && (proxiData.items || proxiData.itemList)) {
+    const list = proxiData.items || proxiData.itemList || [];
+    return reply.send({ data: { videos: list.map(normalizeTikTokItem) } });
+  }
+
+  // Fallback: try TikTok's own (often blocked) recommend endpoint
+  try {
+    const res = await doFetch(
+      "https://www.tiktok.com/api/recommend/item_list/?count=20&id=1&type=5&secUid=&maxCursor=0&minCursor=0&sourceType=12&appId=1233&region=US&priority_region=&language=en",
+      "application/json",
+      { "Referer": "https://www.tiktok.com/", "Origin": "https://www.tiktok.com" }
+    );
+    const text = await res.text();
+    if (text.trim().startsWith("<")) throw new Error("TikTok returned HTML — likely blocked");
+    const data = JSON.parse(text);
+    const list = data.itemList || [];
+    return reply.send({ data: { videos: list.map(normalizeTikTokItem) } });
+  } catch(err) {
+    console.error("TikTok trending error:", err.message);
+    return reply.send({ error: proxiErr || err.message });
+  }
+});
+
+fastify.get("/api/tiktok/search", async (req, reply) => {
+  const q = req.query.q || "";
+  if (!q.trim()) return reply.send({ data: { videos: [] } });
+
+  // Try ProxiTok first
+  const { data: proxiData, error: proxiErr } = await fetchProxiTok(`/api/search?keyword=${encodeURIComponent(q)}&cursor=0&count=20`);
+  if (proxiData && (proxiData.items || proxiData.itemList)) {
+    const list = proxiData.items || proxiData.itemList || [];
+    return reply.send({ data: { videos: list.map(normalizeTikTokItem) } });
+  }
+
+  // Fallback: TikTok search endpoint (often blocked)
+  try {
+    const url = `https://www.tiktok.com/api/search/item/full/?keyword=${encodeURIComponent(q)}&offset=0&count=20&from_page=search`;
+    const res = await doFetch(url, "application/json", {
+      "Referer": "https://www.tiktok.com/",
+      "Origin": "https://www.tiktok.com"
+    });
+    const text = await res.text();
+    if (text.trim().startsWith("<")) throw new Error("TikTok returned HTML — likely blocked");
+    const data = JSON.parse(text);
+    const list = data.item_list || [];
+    return reply.send({ data: { videos: list.map(normalizeTikTokItem) } });
+  } catch(err) {
+    console.error("TikTok search error:", err.message);
+    return reply.send({ error: proxiErr || err.message });
+  }
+});
+
+// ── SEARCH API ────────────────────────────────────────────────────────────────
+
+fastify.get("/api/search", async (req, reply) => {
+  const q = req.query.q || "";
+  if (!q.trim()) return reply.send({ results: [] });
+  try {
+    // Use DuckDuckGo HTML scrape via proxy
+    const res = await doFetch(
+      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`,
+      "text/html",
+      { "Referer": "https://duckduckgo.com/" }
+    );
+    const html = await res.text();
+    const results = [];
+    // Parse result titles, URLs, snippets from DDG HTML
+    const linkRe = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    const snippetRe = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+    const titles = [], urls = [], snippets = [];
+    let m;
+    while ((m = linkRe.exec(html)) !== null) {
+      const rawUrl = m[1];
+      const title  = m[2].replace(/<[^>]+>/g, "").trim();
+      // DDG wraps URLs — extract uddg param
+      let finalUrl = rawUrl;
+      try {
+        const u = new URL(rawUrl.startsWith("//") ? "https:" + rawUrl : rawUrl);
+        finalUrl = u.searchParams.get("uddg") || rawUrl;
+      } catch {}
+      if (finalUrl && title && !finalUrl.includes("duckduckgo.com")) {
+        titles.push(title);
+        urls.push(decodeURIComponent(finalUrl));
+      }
+    }
+    while ((m = snippetRe.exec(html)) !== null) {
+      snippets.push(m[1].replace(/<[^>]+>/g, "").trim());
+    }
+    for (let i = 0; i < Math.min(titles.length, 10); i++) {
+      results.push({ title: titles[i], url: urls[i], snippet: snippets[i] || "" });
+    }
+    reply.send({ results });
+  } catch(err) {
+    console.error("Search error:", err.message);
+    reply.send({ error: err.message });
   }
 });
 
