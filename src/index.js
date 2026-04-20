@@ -36,7 +36,6 @@ function getUA(url) {
   return DESKTOP_UA;
 }
 
-// FIX A — added Sec-Fetch-* and Pragma headers so sites don't detect/block the proxy
 async function doFetch(url, accept, extra) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 20000);
@@ -48,13 +47,7 @@ async function doFetch(url, accept, extra) {
         "User-Agent": getUA(url),
         "Accept-Language": "en-US,en;q=0.9",
         "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
         "Accept": accept || "*/*",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
-        "Upgrade-Insecure-Requests": "1",
         ...extra,
       },
     });
