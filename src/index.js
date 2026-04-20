@@ -158,19 +158,6 @@ function rewriteHtml(html, base) {
 function makeInjection(origin, base) {
   return `<script>
 (function(){
-  // ── Iframe / top-level spoof (defeats TikTok, Instagram, etc.) ──
-  try {
-    Object.defineProperty(window, 'frameElement', { get: () => null, configurable: true });
-    Object.defineProperty(window, 'self',   { get: () => window, configurable: true });
-    Object.defineProperty(window, 'top',    { get: () => window, configurable: true });
-    Object.defineProperty(window, 'parent', { get: () => window, configurable: true });
-  } catch(e) {}
-
-  // Spoof document.referrer to look like same-site navigation
-  try {
-    Object.defineProperty(document, 'referrer', { get: () => ${JSON.stringify(origin + "/")}, configurable: true });
-  } catch(e) {}
-
   var _b=${JSON.stringify(base)},_lo=location.origin;
   // Form submit interceptor
   document.addEventListener('submit',function(e){
