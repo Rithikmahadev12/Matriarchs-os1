@@ -29,25 +29,14 @@ const DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 const MOBILE_UA  = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
 
 function getUA(url) {
-  const host = new URL(url).hostname;
-  if (host.includes("tiktok") || host.includes("instagram")) return MOBILE_UA;
+  try {
+    const host = new URL(url).hostname;
+    if (host.includes("tiktok") || host.includes("instagram")) return MOBILE_UA;
+  } catch {}
   return DESKTOP_UA;
 }
 
-// Rewrite certain hostile URLs to friendlier alternatives
-function rewriteTargetUrl(url) {
-  try {
-    const u = new URL(url);
-    // TikTok → ProxiTok (open source TikTok frontend, proxy-friendly)
-    if (u.hostname === "tiktok.com" || u.hostname === "www.tiktok.com") {
-      return "https://tok.smahat.cn/";
-    }
-    // YouTube — handled by the YouTube app window directly
-  } catch {}
-  return url;
-}
-
-async function doFetch(url, accept, extraHeaders) {
+async function doFetch(url, accept, extra) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 20000);
   try {
@@ -58,52 +47,39 @@ async function doFetch(url, accept, extraHeaders) {
         "User-Agent": getUA(url),
         "Accept-Language": "en-US,en;q=0.9",
         "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
         "Accept": accept || "*/*",
-        ...extraHeaders,
+        ...extra,
       },
     });
   } finally { clearTimeout(t); }
 }
 
-// Convert any URL to an absolute URL through our proxy fetch endpoint
 function toFetch(url, base) {
   if (!url) return url;
   let u = url.trim();
-  if (!u || u.startsWith("data:") || u.startsWith("#") ||
-      u.startsWith("javascript:") || u.startsWith("mailto:") ||
-      u.startsWith("blob:") || u.startsWith("about:") ||
+  if (!u || u.startsWith("data:") || u.startsWith("#") || u.startsWith("javascript:") ||
+      u.startsWith("mailto:") || u.startsWith("blob:") || u.startsWith("about:") ||
       u.startsWith("/proxy/")) return u;
-  // Handle protocol-relative URLs like //cdn.example.com/file.js
-  if (u.startsWith("//")) u = new URL(base).protocol + u;
-  try {
-    const abs = new URL(u, base).toString();
-    return "/proxy/fetch?url=" + encodeURIComponent(abs);
-  } catch { return url; }
+  if (u.startsWith("//")) { try { u = new URL(base).protocol + u; } catch {} }
+  try { return "/proxy/fetch?url=" + encodeURIComponent(new URL(u, base).toString()); }
+  catch { return url; }
 }
 
-// Convert any URL to go through our page proxy
 function toPage(url, base) {
   if (!url) return url;
   let u = url.trim();
-  if (!u || u.startsWith("data:") || u.startsWith("#") ||
-      u.startsWith("javascript:") || u.startsWith("mailto:") ||
-      u.startsWith("blob:") || u.startsWith("about:") ||
+  if (!u || u.startsWith("data:") || u.startsWith("#") || u.startsWith("javascript:") ||
+      u.startsWith("mailto:") || u.startsWith("blob:") || u.startsWith("about:") ||
       u.startsWith("/proxy/")) return u;
-  // Handle protocol-relative URLs
-  if (u.startsWith("//")) u = new URL(base).protocol + u;
-  try {
-    const abs = new URL(u, base).toString();
-    return "/proxy/?url=" + encodeURIComponent(abs);
-  } catch { return url; }
+  if (u.startsWith("//")) { try { u = new URL(base).protocol + u; } catch {} }
+  try { return "/proxy/?url=" + encodeURIComponent(new URL(u, base).toString()); }
+  catch { return url; }
 }
 
 function rewriteCss(css, base) {
   return css.replace(/url\(\s*(['"]?)((?!data:)[^'"\)]+)\1\s*\)/gi, (m, q, u) => {
-    try {
-      const abs = new URL(u.trim(), base).toString();
-      return `url(${q}/proxy/fetch?url=${encodeURIComponent(abs)}${q})`;
-    } catch { return m; }
+    try { return `url(${q}/proxy/fetch?url=${encodeURIComponent(new URL(u.trim(), base).toString())}${q})`; }
+    catch { return m; }
   });
 }
 
@@ -111,48 +87,45 @@ function rewriteHtml(html, base) {
   // Remove CSP
   html = html.replace(/<meta[^>]+http-equiv=["']Content-Security-Policy["'][^>]*\/?>/gi, "");
 
-  // Rewrite <link> tags — stylesheet hrefs go to fetch proxy, others to page proxy
+  // <link> tags — stylesheets to fetch proxy, nav links to page proxy
   html = html.replace(/<link(\s[^>]*)>/gi, (tag, attrs) => {
-    const isStylesheet = /rel=["']([^"']*\bstylesheet\b[^"']*)["']/i.test(attrs)
-                      || /rel=["']([^"']*\bpreload\b[^"']*)["']/i.test(attrs);
+    const isStyle = /rel=["'][^"']*\b(stylesheet|preload)\b[^"']*["']/i.test(attrs);
     attrs = attrs.replace(/\shref\s*=\s*(["'])([^"']+)\1/gi, (m, q, url) => {
       if (!url || url.startsWith("data:") || url.startsWith("#") || url.startsWith("javascript:")) return m;
-      return ` href=${q}${isStylesheet ? toFetch(url, base) : toPage(url, base)}${q}`;
+      return ` href=${q}${isStyle ? toFetch(url, base) : toPage(url, base)}${q}`;
     });
     return `<link${attrs}>`;
   });
 
-  // src= attributes (scripts, images, iframes, video, audio)
+  // src= attributes
   html = html.replace(/\bsrc\s*=\s*(["'])(.*?)\1/gi, (m, q, url) =>
-    `src=${q}${toFetch(url, base)}${q}`);
+    url ? `src=${q}${toFetch(url, base)}${q}` : m);
 
-  // href= on non-link tags (anchors etc)
-  html = html.replace(/(<(?!link)[a-z][^>]*?)\shref\s*=\s*(["'])([^"']+)\2/gi, (m, pre, q, url) => {
+  // href= on non-link tags
+  html = html.replace(/(<(?!link\b)[a-z][^>]*?)\shref\s*=\s*(["'])([^"']+)\2/gi, (m, pre, q, url) => {
     if (!url || url.startsWith("data:") || url.startsWith("#") || url.startsWith("javascript:") ||
         url.startsWith("mailto:") || url.startsWith("/proxy/")) return m;
     return `${pre} href=${q}${toPage(url, base)}${q}`;
   });
 
-  // action= on forms
+  // action= forms
   html = html.replace(/\baction\s*=\s*(["'])(.*?)\1/gi, (m, q, url) =>
-    `action=${q}${toPage(url, base)}${q}`);
+    url ? `action=${q}${toPage(url, base)}${q}` : m);
 
   // srcset=
   html = html.replace(/\bsrcset\s*=\s*(["'])(.*?)\1/gi, (m, q, srcset) => {
     const rw = srcset.split(",").map(part => {
-      const t = part.trim();
-      const sp = t.search(/\s/);
-      if (sp === -1) return toFetch(t, base);
-      return toFetch(t.slice(0, sp), base) + t.slice(sp);
+      const t = part.trim(), si = t.search(/\s/);
+      return si === -1 ? toFetch(t, base) : toFetch(t.slice(0, si), base) + t.slice(si);
     }).join(", ");
     return `srcset=${q}${rw}${q}`;
   });
 
   // <style> blocks
   html = html.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/gi,
-    (m, open, css, close) => open + rewriteCss(css, base) + close);
+    (m, o, css, c) => o + rewriteCss(css, base) + c);
 
-  // inline style= attributes
+  // inline style=
   html = html.replace(/\bstyle\s*=\s*(["'])(.*?)\1/gi,
     (m, q, css) => `style=${q}${rewriteCss(css, base)}${q}`);
 
@@ -162,106 +135,76 @@ function rewriteHtml(html, base) {
 function makeInjection(origin, base) {
   return `<script>
 (function(){
-  var _base=${JSON.stringify(base)};
-  var _origin=${JSON.stringify(origin)};
-  var _lo=location.origin;
-
-  // ── fetch hook ──
-  var _f=window.fetch;
-  window.fetch=function(input,init){
-    try{
-      var url=typeof input==='string'?input:(input instanceof Request?input.url:String(input));
-      if(url&&!url.startsWith('data:')&&!url.startsWith('blob:')){
-        var abs=new URL(url,_base).toString();
-        if(!abs.startsWith(_lo))return _f('/proxy/fetch?url='+encodeURIComponent(abs),init);
-      }
-    }catch(e){}
-    return _f(input,init);
-  };
-
-  // ── XHR hook ──
-  var _xo=XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open=function(m,url){
-    try{
-      if(url&&!String(url).startsWith('data:')&&!String(url).startsWith('blob:')){
-        var abs=new URL(String(url),_base).toString();
-        if(!abs.startsWith(_lo))arguments[1]='/proxy/fetch?url='+encodeURIComponent(abs);
-      }
-    }catch(e){}
-    return _xo.apply(this,arguments);
-  };
-
-  // ── Form submit interceptor — fixes GET forms losing ?url= param ──
-  function handleFormSubmit(form){
-    if(!form)return false;
-    var method=(form.method||'get').toLowerCase();
-    if(method==='post')return false;
-    var action=form.getAttribute('action')||'';
+  var _b=${JSON.stringify(base)},_lo=location.origin;
+  // Form submit interceptor
+  document.addEventListener('submit',function(e){
+    var f=e.target;
+    if(!f||(f.method||'get').toLowerCase()==='post')return;
+    e.preventDefault();
+    var action=f.getAttribute('action')||'';
     var abs;
     try{
-      if(action.startsWith('/proxy/')){
-        var match=action.match(/[?&]url=([^&]+)/);
-        abs=match?decodeURIComponent(match[1]):_base;
-      }else{
-        abs=new URL(action||'',_base).toString();
-      }
-    }catch(err){abs=_base;}
-    var params=new URLSearchParams(new FormData(form));
-    var qs=params.toString();
-    var dest=abs+(abs.includes('?')?'&':'?')+qs;
-    top.location.href='/proxy/?url='+encodeURIComponent(dest);
-    return true;
-  }
-  document.addEventListener('submit',function(e){
-    if(handleFormSubmit(e.target))e.preventDefault();
+      if(action.startsWith('/proxy/')){var m=action.match(/[?&]url=([^&]+)/);abs=m?decodeURIComponent(m[1]):_b;}
+      else{abs=new URL(action||'',_b).toString();}
+    }catch(e){abs=_b;}
+    var qs=new URLSearchParams(new FormData(f)).toString();
+    top.location.href='/proxy/?url='+encodeURIComponent(abs+(abs.includes('?')?'&':'?')+qs);
   },true);
-  // Also catch Enter key in input fields
+  // Enter key in inputs
   document.addEventListener('keydown',function(e){
     if(e.key!=='Enter')return;
     var el=e.target;
     if(el.tagName==='INPUT'||el.tagName==='TEXTAREA'){
-      var form=el.closest('form');
-      if(form&&handleFormSubmit(form)){e.preventDefault();e.stopPropagation();}
+      var f=el.closest('form');
+      if(f&&(f.method||'get').toLowerCase()!=='post'){
+        e.preventDefault();e.stopPropagation();
+        var action=f.getAttribute('action')||'';
+        var abs;
+        try{
+          if(action.startsWith('/proxy/')){var m=action.match(/[?&]url=([^&]+)/);abs=m?decodeURIComponent(m[1]):_b;}
+          else{abs=new URL(action||'',_b).toString();}
+        }catch(err){abs=_b;}
+        var qs=new URLSearchParams(new FormData(f)).toString();
+        top.location.href='/proxy/?url='+encodeURIComponent(abs+(abs.includes('?')?'&':'?')+qs);
+      }
     }
   },true);
-
-  // ── Click interceptor ──
+  // Click interceptor
   document.addEventListener('click',function(e){
     var el=e.target;
     while(el&&el.tagName!=='A')el=el.parentElement;
     if(!el||!el.href)return;
     var href=el.href;
-    if(!href||href.startsWith('#')||href.startsWith('javascript:')||
-       href.startsWith('mailto:')||href.startsWith('blob:')||
-       href.indexOf('/proxy/')!==-1)return;
-    try{
-      var u=new URL(href);
-      if(u.origin===_lo)return;
-      e.preventDefault();e.stopPropagation();
-      top.location.href='/proxy/?url='+encodeURIComponent(u.toString());
-    }catch(err){}
+    if(!href||href.startsWith('#')||href.startsWith('javascript:')||href.startsWith('mailto:')||href.startsWith('blob:')||href.indexOf('/proxy/')!==-1)return;
+    try{var u=new URL(href);if(u.origin===_lo)return;e.preventDefault();e.stopPropagation();top.location.href='/proxy/?url='+encodeURIComponent(u.toString());}catch(err){}
   },true);
-
-  // ── window.open hook ──
-  var _wo=window.open;
-  window.open=function(url,t,f){
-    if(url&&!url.startsWith('#')&&!url.startsWith('javascript:')){
-      try{var u=new URL(url,_base);if(u.origin!==_lo)url='/proxy/?url='+encodeURIComponent(u.toString());}catch(e){}
-    }
-    return _wo?_wo.call(this,url,t,f):null;
+  // fetch hook
+  var _f=window.fetch;
+  window.fetch=function(input,init){
+    try{
+      var url=typeof input==='string'?input:(input instanceof Request?input.url:String(input));
+      if(url&&!url.startsWith('data:')&&!url.startsWith('blob:')){
+        var abs=new URL(url,_b).toString();
+        if(!abs.startsWith(_lo))return _f('/proxy/fetch?url='+encodeURIComponent(abs),init);
+      }
+    }catch(e){}
+    return _f(input,init);
   };
-
-  // ── history hook → tell parent our current URL ──
-  var _pp=history.pushState;
-  history.pushState=function(s,t,url){
-    _pp.apply(this,arguments);
-    try{top.postMessage({type:'mos-nav',url:new URL(url||'',_base).toString()},'*');}catch(e){}
+  // XHR hook
+  var _xo=XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open=function(m,url){
+    try{
+      if(url&&!String(url).startsWith('data:')&&!String(url).startsWith('blob:')){
+        var abs=new URL(String(url),_b).toString();
+        if(!abs.startsWith(_lo))arguments[1]='/proxy/fetch?url='+encodeURIComponent(abs);
+      }
+    }catch(e){}
+    return _xo.apply(this,arguments);
   };
-  var _rp=history.replaceState;
-  history.replaceState=function(s,t,url){
-    _rp.apply(this,arguments);
-    try{top.postMessage({type:'mos-nav',url:new URL(url||'',_base).toString()},'*');}catch(e){}
-  };
+  // history hook
+  var _pp=history.pushState,_rp=history.replaceState;
+  history.pushState=function(s,t,url){_pp.apply(this,arguments);try{top.postMessage({type:'mos-nav',url:new URL(url||'',_b).toString()},'*');}catch(e){}};
+  history.replaceState=function(s,t,url){_rp.apply(this,arguments);try{top.postMessage({type:'mos-nav',url:new URL(url||'',_b).toString()},'*');}catch(e){}};
 })();
 </script>`;
 }
@@ -269,51 +212,36 @@ function makeInjection(origin, base) {
 function errorPage(msg, url) {
   return `<!DOCTYPE html><html><head><title>Proxy Error</title>
 <style>body{font-family:monospace;background:#0a0a0a;color:#ff6b6b;padding:40px;margin:0}
-h2{margin-bottom:8px}p{color:#aaa;margin:4px 0}.url{color:#555;font-size:11px;margin-top:16px}</style>
+p{color:#aaa;margin:4px 0}.url{color:#555;font-size:11px;margin-top:16px}</style>
 </head><body><h2>Proxy Error</h2><p>${msg}</p><p class="url">${url}</p></body></html>`;
 }
 
-// ── PROXY — HTML PAGE LOADER ─────────────────────────────────────────────────
+// ── PROXY PAGE ────────────────────────────────────────────────────────────────
 
 fastify.get("/proxy/", async (req, reply) => {
   const target = req.query.url;
   if (!target) return reply.code(400).send("Missing ?url=");
-
   let targetUrl;
-  try { targetUrl = new URL(target); }
-  catch { return reply.code(400).send("Invalid URL"); }
+  try { targetUrl = new URL(target); } catch { return reply.code(400).send("Invalid URL"); }
   if (isBlocked(targetUrl.hostname)) return reply.code(403).send("Blocked");
 
-  // Rewrite hostile URLs to friendlier alternatives
-  const rewrittenUrl = rewriteTargetUrl(targetUrl.toString());
-
   try {
-    const res = await doFetch(rewrittenUrl,
+    const res = await doFetch(targetUrl.toString(),
       "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      { "Referer": targetUrl.origin + "/", "Origin": targetUrl.origin,
-        "Sec-Fetch-Mode": "navigate", "Upgrade-Insecure-Requests": "1" });
+      { "Referer": targetUrl.origin+"/", "Origin": targetUrl.origin, "Upgrade-Insecure-Requests": "1" });
 
     const ct = res.headers.get("content-type") || "";
-    // Use original target URL as base (not the rewritten one) so links resolve correctly
     const finalUrl = targetUrl.toString();
 
-    // Not HTML? Redirect to fetch proxy so browser gets raw resource
-    if (ct && !ct.includes("text/html") && !ct.includes("xhtml") && ct !== "") {
-      return reply.redirect("/proxy/fetch?url=" + encodeURIComponent(targetUrl.toString()));
+    if (ct && !ct.includes("text/html") && !ct.includes("xhtml")) {
+      return reply.redirect("/proxy/fetch?url=" + encodeURIComponent(target));
     }
 
     let html = await res.text();
     html = rewriteHtml(html, finalUrl);
-
-    // Inject runtime hooks
-    const injection = makeInjection(new URL(finalUrl).origin, finalUrl);
-    if (/<head[\s>]/i.test(html)) {
-      html = html.replace(/<head(\s[^>]*)?>/i, (m) => m + injection);
-    } else if (/<html[\s>]/i.test(html)) {
-      html = html.replace(/<html(\s[^>]*)?>/i, (m) => m + injection);
-    } else {
-      html = injection + html;
-    }
+    const inject = makeInjection(targetUrl.origin, finalUrl);
+    if (/<head[\s>]/i.test(html)) html = html.replace(/<head(\s[^>]*)?>/i, m => m + inject);
+    else html = inject + html;
 
     reply.removeHeader("x-frame-options");
     reply.removeHeader("content-security-policy");
@@ -321,22 +249,19 @@ fastify.get("/proxy/", async (req, reply) => {
     reply.removeHeader("transfer-encoding");
     reply.header("content-type", "text/html; charset=utf-8");
     return reply.send(html);
-
   } catch (err) {
     console.error("Page proxy error:", err.message);
     return reply.code(502).type("text/html").send(errorPage(err.message, target));
   }
 });
 
-// ── PROXY — RESOURCE FETCHER ─────────────────────────────────────────────────
+// ── PROXY FETCH ───────────────────────────────────────────────────────────────
 
 fastify.get("/proxy/fetch", async (req, reply) => {
   const target = req.query.url;
   if (!target) return reply.code(400).send("Missing ?url=");
-
   let targetUrl;
-  try { targetUrl = new URL(target); }
-  catch { return reply.code(400).send("Invalid URL"); }
+  try { targetUrl = new URL(target); } catch { return reply.code(400).send("Invalid URL"); }
   if (isBlocked(targetUrl.hostname)) return reply.code(403).send("Blocked");
 
   try {
@@ -346,14 +271,13 @@ fastify.get("/proxy/fetch", async (req, reply) => {
       headers: {
         "User-Agent": getUA(targetUrl.toString()),
         "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
         "Accept": accept,
         "Referer": targetUrl.origin + "/",
         "Origin": targetUrl.origin,
       },
     });
 
-    const ct = res.headers.get("content-type") || "application/octet-stream";
+    const ct  = res.headers.get("content-type") || "application/octet-stream";
     const url = targetUrl.toString();
 
     reply.removeHeader("x-frame-options");
@@ -365,137 +289,16 @@ fastify.get("/proxy/fetch", async (req, reply) => {
     reply.header("access-control-allow-headers", "*");
     reply.header("cross-origin-resource-policy", "cross-origin");
 
-    // CSS — rewrite url() references
     if (ct.includes("text/css") || url.match(/\.css(\?|$)/i)) {
-      const css = await res.text();
-      return reply.send(rewriteCss(css, url));
+      return reply.send(rewriteCss(await res.text(), url));
     }
-
-    // Sub-HTML pages
     if (ct.includes("text/html")) {
-      let html = await res.text();
-      html = rewriteHtml(html, url);
-      return reply.send(html);
+      return reply.send(rewriteHtml(await res.text(), url));
     }
-
-    // Everything else (JS, images, fonts, etc.) — raw passthrough
-    const buf = await res.arrayBuffer();
-    return reply.send(Buffer.from(buf));
-
+    return reply.send(Buffer.from(await res.arrayBuffer()));
   } catch (err) {
-    console.error("Resource proxy error:", err.message);
+    console.error("Fetch proxy error:", err.message);
     return reply.code(502).send("Proxy error: " + err.message);
-  }
-});
-
-// GET /api/youtube/search?q=query
-fastify.get("/api/youtube/search", async (req, reply) => {
-  reply.header("access-control-allow-origin", "*");
-  const q = (req.query.q || "").trim();
-  if (!q) return reply.send({ results: [] });
-  try {
-    const data = await invidiousFetch(`/api/v1/search?q=${encodeURIComponent(q)}&type=video&fields=videoId,title,author,lengthSeconds,viewCount,publishedText,videoThumbnails`);
-    return reply.send({ results: data });
-  } catch (err) {
-    return reply.code(502).send({ error: err.message });
-  }
-});
-
-// GET /api/youtube/trending
-fastify.get("/api/youtube/trending", async (req, reply) => {
-  reply.header("access-control-allow-origin", "*");
-  try {
-    const data = await invidiousFetch("/api/v1/trending?fields=videoId,title,author,lengthSeconds,viewCount,publishedText,videoThumbnails");
-    return reply.send({ results: data });
-  } catch (err) {
-    return reply.code(502).send({ error: err.message });
-  }
-});
-
-// GET /api/youtube/video?id=VIDEO_ID — get video details + stream URL
-fastify.get("/api/youtube/video", async (req, reply) => {
-  reply.header("access-control-allow-origin", "*");
-  const id = req.query.id;
-  if (!id) return reply.code(400).send({ error: "Missing id" });
-  try {
-    const data = await invidiousFetch(`/api/v1/videos/${id}?fields=videoId,title,author,description,viewCount,likeCount,lengthSeconds,adaptiveFormats,formatStreams,videoThumbnails`);
-    return reply.send(data);
-  } catch (err) {
-    return reply.code(502).send({ error: err.message });
-  }
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  TIKTOK SCRAPER
-//  Uses TikTok's internal web API endpoints with browser-like headers
-// ══════════════════════════════════════════════════════════════════════════════
-
-const TT_HEADERS = {
-  "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-  "Accept": "application/json, text/plain, */*",
-  "Accept-Language": "en-US,en;q=0.9",
-  "Referer": "https://www.tiktok.com/",
-  "sec-fetch-site": "same-site",
-};
-
-async function ttFetch(url) {
-  const res = await fetch(url, {
-    headers: TT_HEADERS,
-    signal: AbortSignal.timeout(10000),
-  });
-  return res.json();
-}
-
-// GET /api/tiktok/trending
-fastify.get("/api/tiktok/trending", async (req, reply) => {
-  reply.header("access-control-allow-origin", "*");
-  try {
-    const data = await ttFetch(
-      "https://www.tiktok.com/api/recommend/itemlist/?aid=1988&count=20&type=5&device_platform=web_mobile"
-    );
-    const videos = (data.itemList || []).map(item => ({
-      id: item.id,
-      desc: item.desc,
-      author: item.author?.nickname || item.author?.uniqueId,
-      cover: item.video?.cover,
-      playUrl: item.video?.playAddr,
-      likeCount: item.stats?.diggCount,
-      viewCount: item.stats?.playCount,
-      shareCount: item.stats?.shareCount,
-      embedUrl: `https://www.tiktok.com/embed/v2/${item.id}`,
-    }));
-    return reply.send({ videos });
-  } catch (err) {
-    return reply.code(502).send({ error: err.message, videos: [] });
-  }
-});
-
-// GET /api/tiktok/search?q=query
-fastify.get("/api/tiktok/search", async (req, reply) => {
-  reply.header("access-control-allow-origin", "*");
-  const q = (req.query.q || "").trim();
-  if (!q) return reply.send({ videos: [] });
-  try {
-    const data = await ttFetch(
-      `https://www.tiktok.com/api/search/general/full/?aid=1988&keyword=${encodeURIComponent(q)}&count=20&device_platform=web_mobile`
-    );
-    const videos = (data.data || [])
-      .filter(r => r.item)
-      .map(r => r.item)
-      .map(item => ({
-        id: item.id,
-        desc: item.desc,
-        author: item.author?.nickname || item.author?.uniqueId,
-        cover: item.video?.cover,
-        playUrl: item.video?.playAddr,
-        likeCount: item.stats?.diggCount,
-        viewCount: item.stats?.playCount,
-        shareCount: item.stats?.shareCount,
-        embedUrl: `https://www.tiktok.com/embed/v2/${item.id}`,
-      }));
-    return reply.send({ videos });
-  } catch (err) {
-    return reply.code(502).send({ error: err.message, videos: [] });
   }
 });
 
@@ -519,36 +322,3 @@ function shutdown() { fastify.close(); process.exit(0); }
 let port = parseInt(process.env.PORT || "");
 if (isNaN(port)) port = 8080;
 fastify.listen({ port, host: "0.0.0.0" });
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  TIKTOK API INTEGRATION
-//  Uses Client Credentials flow — token cached in memory
-// ══════════════════════════════════════════════════════════════════════════════
-
-let ttToken = null;
-let ttTokenExpiry = 0;
-
-async function getTikTokToken() {
-  if (ttToken && Date.now() < ttTokenExpiry) return ttToken;
-
-  const key    = process.env.TIKTOK_CLIENT_KEY;
-  const secret = process.env.TIKTOK_CLIENT_SECRET;
-  if (!key || !secret) throw new Error("TikTok credentials not configured");
-
-  const res = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_key: key,
-      client_secret: secret,
-      grant_type: "client_credentials",
-    }),
-  });
-
-  const data = await res.json();
-  if (!data.access_token) throw new Error("Token error: " + JSON.stringify(data));
-
-  ttToken = data.access_token;
-  ttTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
-  return ttToken;
-}
