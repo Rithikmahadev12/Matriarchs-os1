@@ -802,7 +802,7 @@ function openBrowser() {
     picker.style.cssText = "position:relative;display:flex;align-items:center;flex-shrink:0";
     const btn = document.createElement("button");
     btn.style.cssText = "background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:var(--text-dim);font-family:var(--mono);font-size:10px;padding:4px 8px;border-radius:4px;cursor:pointer;white-space:nowrap;margin-right:6px;letter-spacing:0.04em;";
-    btn.textContent = SEARCH_ENGINES[currentEngine]?.label || "DuckDuckGo";
+    btn.textContent = SEARCH_ENGINES[currentEngine]?.label || "Brave";
     const drop = document.createElement("div");
     drop.style.cssText = "display:none;position:absolute;top:calc(100% + 6px);left:0;background:#0d1a10;border:1px solid rgba(255,255,255,0.12);border-radius:6px;overflow:hidden;z-index:9999;min-width:130px;box-shadow:0 8px 24px rgba(0,0,0,0.5);";
     Object.entries(SEARCH_ENGINES).forEach(([key, eng]) => {
@@ -837,8 +837,8 @@ function openBrowser() {
     if (!url.startsWith("http://")&&!url.startsWith("https://")) {
       url=(url.includes(" ")||!url.includes(".")) ? getSearchUrl(url) : "https://"+url;
     }
-    // ── FIX: always absolute URL so CDN/proxy hosting doesn't break iframe src ──
-    const proxyUrl = location.origin + "/proxy/?url=" + encodeURIComponent(url);
+    const proxyUrl="/proxy/?url="+encodeURIComponent(url);
+    // Always tear down and recreate iframe — most reliable approach
     frameWrap.innerHTML="";
     const iframe=document.createElement("iframe");
     iframe.style.cssText="width:100%;height:100%;border:none;background:#fff";
@@ -861,6 +861,7 @@ function openBrowser() {
   goBtn.addEventListener("click", () => {
     const typed = addrEl.value.trim();
     if (!typed) return;
+    // Always force navigate even if same URL
     navigate(typed, true);
   });
   addrEl.addEventListener("keydown", (e) => {
@@ -874,8 +875,7 @@ function openBrowser() {
       navIdx--;
       addrEl.value = navHistory[navIdx];
       const iframe = frameWrap.querySelector("iframe");
-      // ── FIX: absolute URL for back navigation ──
-      if (iframe) iframe.src = location.origin + "/proxy/?url=" + encodeURIComponent(navHistory[navIdx]);
+      if (iframe) iframe.src = "/proxy/?url=" + encodeURIComponent(navHistory[navIdx]);
       updateNavBtns();
     }
   });
@@ -884,8 +884,7 @@ function openBrowser() {
       navIdx++;
       addrEl.value = navHistory[navIdx];
       const iframe = frameWrap.querySelector("iframe");
-      // ── FIX: absolute URL for forward navigation ──
-      if (iframe) iframe.src = location.origin + "/proxy/?url=" + encodeURIComponent(navHistory[navIdx]);
+      if (iframe) iframe.src = "/proxy/?url=" + encodeURIComponent(navHistory[navIdx]);
       updateNavBtns();
     }
   });
@@ -898,6 +897,7 @@ function openBrowser() {
     }
   });
 
+  // Update address bar when iframe navigates (via load event or postMessage)
   frameWrap.addEventListener("load", (e) => {
     if (e.target.tagName === "IFRAME") {
       try {
@@ -908,6 +908,7 @@ function openBrowser() {
     }
   }, true);
 
+  // Also update from postMessage sent by injected script (pushState navigations)
   window.addEventListener("message", (e) => {
     if (e.data && e.data.type === "mos-nav" && e.data.url) {
       addrEl.value = e.data.url;
@@ -1005,6 +1006,7 @@ function openSearch(initialQuery) {
     }
   }
 
+  // Expose for external calls
   win._doSearch = doSearch;
 
   goBtn.addEventListener("click", () => doSearch(input.value));
@@ -1019,7 +1021,6 @@ function doNativeSearch(q) {
   if (win && win._doSearch) win._doSearch(q);
   else openSearch(q);
 }
-
 
 // ══════════════════════════════════════
 //  YOUTUBE APP
@@ -1155,7 +1156,6 @@ function openYouTube() {
   doTrending();
 }
 
-
 // ══════════════════════════════════════
 //  TIKTOK APP
 // ══════════════════════════════════════
@@ -1208,13 +1208,17 @@ function openTikTok() {
   const player    = win.querySelector("#tt-player");
   const status    = win.querySelector("#tt-status");
 
-  function showStatus(msg) { status.style.display = "block"; status.textContent = msg; }
+  function showStatus(msg) {
+    status.style.display = "block";
+    status.textContent = msg;
+  }
   function hideStatus() { status.style.display = "none"; }
 
   function renderVideos(data) {
     grid.style.display = "grid";
     player.style.display = "none";
     grid.innerHTML = "";
+
     const videos = data?.data?.videos || [];
     if (!videos.length) {
       grid.innerHTML = `<div style="grid-column:1/-1;color:#555;font-family:var(--mono);font-size:12px;padding:40px;text-align:center">
@@ -1223,6 +1227,7 @@ function openTikTok() {
       </div>`;
       return;
     }
+
     videos.forEach(v => {
       const card = document.createElement("div");
       card.style.cssText = "background:#111;border-radius:8px;overflow:hidden;cursor:pointer;border:1px solid rgba(255,255,255,0.06)";
@@ -1275,7 +1280,9 @@ function openTikTok() {
       hideStatus();
       if (data.error) { showStatus("Error: " + data.error); return; }
       renderVideos(data);
-    } catch (err) { showStatus("Error: " + err.message); }
+    } catch (err) {
+      showStatus("Error: " + err.message);
+    }
   }
 
   async function doTrending() {
@@ -1287,15 +1294,18 @@ function openTikTok() {
       hideStatus();
       if (data.error) { showStatus("Error: " + data.error); return; }
       renderVideos(data);
-    } catch (err) { showStatus("Error: " + err.message); }
+    } catch (err) {
+      showStatus("Error: " + err.message);
+    }
   }
 
   goBtn.addEventListener("click", () => { if (searchEl.value.trim()) doSearch(searchEl.value.trim()); });
   searchEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && searchEl.value.trim()) doSearch(searchEl.value.trim()); });
   trendBtn.addEventListener("click", doTrending);
+
+  // Load trending on open
   doTrending();
 }
-
 
 // ══════════════════════════════════════
 //  ABOUT WINDOW
