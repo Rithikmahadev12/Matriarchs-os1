@@ -36,9 +36,31 @@ function getUA(url) {
   return DESKTOP_UA;
 }
 
+function isTikTokHost(url) {
+  try {
+    const host = new URL(url).hostname;
+    return host.includes("tiktok.com") || host.includes("tiktokcdn.com") || host.includes("tiktokv.com");
+  } catch { return false; }
+}
+
 async function doFetch(url, accept, extra) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 20000);
+
+  const tikTok = isTikTokHost(url);
+  const tikTokHeaders = tikTok ? {
+    "Referer": "https://www.tiktok.com/",
+    "Origin": "https://www.tiktok.com",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124"',
+    "sec-ch-ua-mobile": "?1",
+    "sec-ch-ua-platform": '"Android"',
+  } : {};
+
   try {
     return await fetch(url, {
       signal: ctrl.signal,
@@ -48,6 +70,7 @@ async function doFetch(url, accept, extra) {
         "Accept-Language": "en-US,en;q=0.9",
         "Cache-Control": "no-cache",
         "Accept": accept || "*/*",
+        ...tikTokHeaders,
         ...extra,
       },
     });
@@ -266,6 +289,18 @@ fastify.get("/proxy/fetch", async (req, reply) => {
 
   try {
     const accept = req.headers["accept"] || "*/*";
+    const tikTok = isTikTokHost(targetUrl.toString());
+    const tikTokHeaders = tikTok ? {
+      "Referer": "https://www.tiktok.com/",
+      "Origin": "https://www.tiktok.com",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
+      "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124"',
+      "sec-ch-ua-mobile": "?1",
+      "sec-ch-ua-platform": '"Android"',
+    } : {};
+
     const res = await fetch(targetUrl.toString(), {
       redirect: "follow",
       headers: {
@@ -274,6 +309,7 @@ fastify.get("/proxy/fetch", async (req, reply) => {
         "Accept": accept,
         "Referer": targetUrl.origin + "/",
         "Origin": targetUrl.origin,
+        ...tikTokHeaders,
       },
     });
 
