@@ -244,6 +244,8 @@ function wireDesktopIcons() {
     if (label === "Terminal"   && !icon.dataset.wired) { icon.onclick = openTerminal;   icon.dataset.wired = "1"; }
     if (label === "Calculator" && !icon.dataset.wired) { icon.onclick = openCalculator; icon.dataset.wired = "1"; }
     if (label === "TikTok"     && !icon.dataset.wired) { icon.onclick = openTikTok;     icon.dataset.wired = "1"; }
+    if (label === "YouTube"    && !icon.dataset.wired) { icon.onclick = openYouTube;    icon.dataset.wired = "1"; }
+    if (label === "Search"     && !icon.dataset.wired) { icon.onclick = openSearch;     icon.dataset.wired = "1"; }
   });
   document.querySelectorAll("#sm-grid .sm-app").forEach(app => {
     const label = app.querySelector("span")?.textContent?.trim();
@@ -252,6 +254,8 @@ function wireDesktopIcons() {
     if (label === "Calculator" && !app.dataset.wired) { app.onclick = () => { openCalculator(); toggleStartMenu(); }; app.dataset.wired = "1"; }
     if (label === "Settings"   && !app.dataset.wired) { app.onclick = () => { openSettings();   toggleStartMenu(); }; app.dataset.wired = "1"; }
     if (label === "TikTok"     && !app.dataset.wired) { app.onclick = () => { openTikTok();     toggleStartMenu(); }; app.dataset.wired = "1"; }
+    if (label === "YouTube"    && !app.dataset.wired) { app.onclick = () => { openYouTube();    toggleStartMenu(); }; app.dataset.wired = "1"; }
+    if (label === "Search"     && !app.dataset.wired) { app.onclick = () => { openSearch();     toggleStartMenu(); }; app.dataset.wired = "1"; }
   });
 }
 
@@ -768,7 +772,7 @@ const SEARCH_ENGINES = {
 
 let currentEngine = localStorage.getItem("mos_engine") || "ddg";
 function getSearchUrl(q) {
-  const e = SEARCH_ENGINES[currentEngine] || SEARCH_ENGINES.brave;
+  const e = SEARCH_ENGINES[currentEngine] || SEARCH_ENGINES.ddg;
   return e.url.replace("%s", encodeURIComponent(q));
 }
 
@@ -914,6 +918,243 @@ function openBrowser() {
   updateNavBtns();
 }
 
+
+// ══════════════════════════════════════
+//  NATIVE SEARCH APP
+// ══════════════════════════════════════
+
+function openSearch(initialQuery) {
+  const existing = document.getElementById("win-search");
+  if (existing) {
+    existing.classList.remove("minimized");
+    bringToFront("win-search");
+    if (initialQuery) {
+      existing.querySelector("#srch-input").value = initialQuery;
+      doNativeSearch(initialQuery);
+    }
+    return;
+  }
+
+  const win = document.createElement("div");
+  win.className = "window"; win.id = "win-search";
+  win.style.cssText = "top:50px;left:80px;width:720px;height:540px";
+  win.innerHTML = `
+    <div class="window-titlebar">
+      <div class="window-controls">
+        <button class="wbtn close" onclick="closeWindow('win-search')"></button>
+        <button class="wbtn min"   onclick="minimizeWindow('win-search')"></button>
+        <button class="wbtn max"   onclick="maximizeWindow('win-search')"></button>
+      </div>
+      <span class="window-title">SEARCH</span>
+    </div>
+    <div class="window-body" style="flex-direction:column;overflow:hidden;background:#0a0a0a;padding:0">
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#111;border-bottom:1px solid rgba(255,255,255,0.08);flex-shrink:0">
+        <span style="color:var(--gold);font-family:var(--mono);font-size:14px;flex-shrink:0">⬡</span>
+        <input id="srch-input" type="text" placeholder="Search anything…"
+          style="flex:1;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);
+          color:#fff;font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:4px;outline:none"
+          autocomplete="off" spellcheck="false"/>
+        <button id="srch-go" style="background:var(--gold);border:none;color:#000;font-family:var(--mono);
+          font-size:11px;padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:bold">GO</button>
+      </div>
+      <div id="srch-status" style="color:#aaa;font-family:var(--mono);font-size:11px;padding:8px 14px;display:none;flex-shrink:0"></div>
+      <div id="srch-results" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:16px"></div>
+    </div>`;
+
+  document.getElementById("windows").appendChild(win);
+  makeDraggable(win); bringToFront("win-search");
+  openWindows["win-search"] = { title: "Search", iconId: "globe" };
+  refreshTaskbar();
+
+  const input  = win.querySelector("#srch-input");
+  const goBtn  = win.querySelector("#srch-go");
+  const status = win.querySelector("#srch-status");
+  const results= win.querySelector("#srch-results");
+
+  async function doSearch(q) {
+    if (!q.trim()) return;
+    status.style.display = "block";
+    status.textContent = "Searching…";
+    results.innerHTML = "";
+    try {
+      const res  = await fetch("/api/search?q=" + encodeURIComponent(q));
+      const data = await res.json();
+      status.style.display = "none";
+      if (!data.results || !data.results.length) {
+        results.innerHTML = `<div style="color:#555;font-family:var(--mono);font-size:12px;padding:40px;text-align:center">No results found for "${escHtml(q)}"</div>`;
+        return;
+      }
+      data.results.forEach(r => {
+        const card = document.createElement("div");
+        card.style.cssText = "border-bottom:1px solid rgba(255,255,255,0.06);padding-bottom:14px;cursor:pointer";
+        card.innerHTML = `
+          <div style="color:var(--gold);font-family:var(--mono);font-size:12px;margin-bottom:4px;text-decoration:underline">${escHtml(r.title||"")}</div>
+          <div style="color:#2a7ae4;font-family:var(--mono);font-size:10px;margin-bottom:6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${escHtml(r.url||"")}</div>
+          <div style="color:#aaa;font-family:var(--mono);font-size:11px;line-height:1.5">${escHtml((r.snippet||"").slice(0,200))}</div>`;
+        card.addEventListener("click", () => {
+          openBrowser();
+          setTimeout(() => {
+            const addr = document.getElementById("sj-address");
+            if (addr) { addr.value = r.url; document.getElementById("sj-go")?.click(); }
+          }, 100);
+        });
+        results.appendChild(card);
+      });
+    } catch(err) {
+      status.style.display = "block";
+      status.textContent = "Error: " + err.message;
+    }
+  }
+
+  // Expose for external calls
+  win._doSearch = doSearch;
+
+  goBtn.addEventListener("click", () => doSearch(input.value));
+  input.addEventListener("keydown", e => { if (e.key==="Enter") doSearch(input.value); });
+
+  if (initialQuery) { input.value = initialQuery; doSearch(initialQuery); }
+  else input.focus();
+}
+
+function doNativeSearch(q) {
+  const win = document.getElementById("win-search");
+  if (win && win._doSearch) win._doSearch(q);
+  else openSearch(q);
+}
+
+// ══════════════════════════════════════
+//  YOUTUBE APP
+// ══════════════════════════════════════
+
+function openYouTube() {
+  const existing = document.getElementById("win-youtube");
+  if (existing) { existing.classList.remove("minimized"); bringToFront("win-youtube"); return; }
+
+  const win = document.createElement("div");
+  win.className = "window"; win.id = "win-youtube";
+  win.style.cssText = "top:50px;left:80px;width:700px;height:520px";
+  win.innerHTML = `
+    <div class="window-titlebar">
+      <div class="window-controls">
+        <button class="wbtn close" onclick="closeWindow('win-youtube')"></button>
+        <button class="wbtn min"   onclick="minimizeWindow('win-youtube')"></button>
+        <button class="wbtn max"   onclick="maximizeWindow('win-youtube')"></button>
+      </div>
+      <span class="window-title">YOUTUBE</span>
+    </div>
+    <div class="window-body" style="flex-direction:column;overflow:hidden;background:#0f0f0f;padding:0">
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#111;border-bottom:1px solid rgba(255,255,255,0.08);flex-shrink:0">
+        <span style="color:#ff0000;font-size:18px;font-weight:bold;font-family:var(--mono);flex-shrink:0">▶</span>
+        <input id="yt-search" type="text" placeholder="Search YouTube…"
+          style="flex:1;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);
+          color:#fff;font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:4px;outline:none"
+          autocomplete="off" spellcheck="false"/>
+        <button id="yt-go" style="background:#ff0000;border:none;color:#fff;font-family:var(--mono);
+          font-size:11px;padding:6px 14px;border-radius:4px;cursor:pointer">GO</button>
+        <button id="yt-trending" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);
+          color:#aaa;font-family:var(--mono);font-size:11px;padding:6px 10px;border-radius:4px;cursor:pointer">TRENDING</button>
+      </div>
+      <div id="yt-status" style="color:#aaa;font-family:var(--mono);font-size:11px;padding:8px 14px;display:none;flex-shrink:0"></div>
+      <div id="yt-grid" style="flex:1;overflow-y:auto;padding:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px"></div>
+      <div id="yt-player" style="flex:1;overflow:hidden;display:none;flex-direction:column;background:#000"></div>
+    </div>`;
+
+  document.getElementById("windows").appendChild(win);
+  makeDraggable(win); bringToFront("win-youtube");
+  openWindows["win-youtube"] = { title: "YouTube", iconId: "globe" };
+  refreshTaskbar();
+
+  const searchEl = win.querySelector("#yt-search");
+  const goBtn    = win.querySelector("#yt-go");
+  const trendBtn = win.querySelector("#yt-trending");
+  const grid     = win.querySelector("#yt-grid");
+  const player   = win.querySelector("#yt-player");
+  const status   = win.querySelector("#yt-status");
+
+  function showStatus(msg) { status.style.display="block"; status.textContent=msg; }
+  function hideStatus() { status.style.display="none"; }
+
+  function fmtNum(n) {
+    if (!n) return "0";
+    if (n >= 1000000) return (n/1000000).toFixed(1)+"M";
+    if (n >= 1000) return (n/1000).toFixed(1)+"K";
+    return String(n);
+  }
+  function fmtTime(s) {
+    if (!s) return "";
+    const m = Math.floor(s/60), sec = s%60;
+    return m+":"+(sec<10?"0":"")+sec;
+  }
+
+  function renderResults(results) {
+    grid.style.display = "grid";
+    player.style.display = "none";
+    grid.innerHTML = "";
+    if (!results || !results.length) {
+      grid.innerHTML = `<div style="grid-column:1/-1;color:#555;font-family:var(--mono);font-size:12px;padding:40px;text-align:center">No results found.</div>`;
+      return;
+    }
+    results.forEach(v => {
+      const thumb = v.videoThumbnails?.[0]?.url || "";
+      const card = document.createElement("div");
+      card.style.cssText = "background:#1a1a1a;border-radius:8px;overflow:hidden;cursor:pointer;border:1px solid rgba(255,255,255,0.06);transition:border-color 0.15s";
+      card.onmouseenter = () => card.style.borderColor = "rgba(255,0,0,0.4)";
+      card.onmouseleave = () => card.style.borderColor = "rgba(255,255,255,0.06)";
+      card.innerHTML = `
+        <div style="position:relative;aspect-ratio:16/9;background:#111">
+          ${thumb ? `<img src="${thumb}" style="width:100%;height:100%;object-fit:cover" loading="lazy">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#333;font-size:24px">▶</div>`}
+          <div style="position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,0.8);color:#fff;font-size:9px;font-family:var(--mono);padding:2px 5px;border-radius:2px">${fmtTime(v.lengthSeconds)}</div>
+        </div>
+        <div style="padding:8px">
+          <div style="color:#fff;font-size:10px;font-family:var(--mono);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin-bottom:4px">${escHtml(v.title||"")}</div>
+          <div style="color:#888;font-size:9px;font-family:var(--mono)">${escHtml(v.author||"")} · ${fmtNum(v.viewCount)} views</div>
+        </div>`;
+      card.addEventListener("click", () => openVideo(v));
+      grid.appendChild(card);
+    });
+  }
+
+  function openVideo(v) {
+    grid.style.display = "none";
+    player.style.display = "flex";
+    player.innerHTML = `
+      <div style="padding:8px 12px;background:#111;display:flex;align-items:center;gap:8px;flex-shrink:0">
+        <button onclick="document.getElementById('yt-grid').style.display='grid';document.getElementById('yt-player').style.display='none'"
+          style="background:rgba(255,255,255,0.1);border:none;color:#fff;font-family:var(--mono);font-size:10px;padding:4px 10px;border-radius:3px;cursor:pointer">← Back</button>
+        <span style="color:#aaa;font-family:var(--mono);font-size:10px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${escHtml((v.title||"").slice(0,60))}</span>
+      </div>
+      <iframe src="https://www.youtube-nocookie.com/embed/${v.videoId}?autoplay=1"
+        style="flex:1;border:none;width:100%" allowfullscreen
+        allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture"></iframe>`;
+  }
+
+  async function doSearch(q) {
+    showStatus("Searching…"); grid.innerHTML = "";
+    try {
+      const res = await fetch("/api/youtube/search?q="+encodeURIComponent(q));
+      const data = await res.json();
+      hideStatus();
+      if (data.error) { showStatus("Error: "+data.error); return; }
+      renderResults(data.results||[]);
+    } catch(err) { showStatus("Error: "+err.message); }
+  }
+
+  async function doTrending() {
+    showStatus("Loading trending…"); grid.innerHTML = "";
+    try {
+      const res = await fetch("/api/youtube/trending");
+      const data = await res.json();
+      hideStatus();
+      if (data.error) { showStatus("Error: "+data.error); return; }
+      renderResults(data.results||[]);
+    } catch(err) { showStatus("Error: "+err.message); }
+  }
+
+  goBtn.addEventListener("click", () => { if (searchEl.value.trim()) doSearch(searchEl.value.trim()); });
+  searchEl.addEventListener("keydown", e => { if (e.key==="Enter" && searchEl.value.trim()) doSearch(searchEl.value.trim()); });
+  trendBtn.addEventListener("click", doTrending);
+  doTrending();
+}
 
 // ══════════════════════════════════════
 //  TIKTOK APP
