@@ -1,73 +1,42 @@
 # ⬡ MATRIARCHS OS
-### Sovereign Edition — Powered by Scramjet
+### Sovereign Edition — v1.0.0
 
-A fully featured web operating system with a built-in proxy engine, desktop environment, multi-user auth, and app suite. Built on top of [Scramjet](https://github.com/MercuryWorkshop/scramjet) — the most advanced interception-based web proxy available.
+A browser-based desktop operating system with a built-in custom proxy engine, multi-user authentication, and a full app suite. No third-party proxy libraries. Everything is built in-house.
 
 ---
 
 ## What is this?
 
-Matriarchs OS is a browser-based desktop environment that routes web traffic through a sovereign proxy layer. It bypasses arbitrary network restrictions and internet censorship while delivering a full desktop experience — complete with a browser, file manager, terminal, calculator, YouTube, TikTok, and an admin panel.
+Matriarchs OS is a web desktop environment that runs entirely in the browser. It has its own proxy engine that rewrites and relays web traffic server-side, letting you browse the open web from within the OS window. It comes with a full desktop UI, windowed apps, a taskbar, start menu, and an owner-level admin panel.
 
 ---
 
 ## Proxy Engine
 
-This project uses **[Scramjet](https://github.com/MercuryWorkshop/scramjet)** under the hood — an experimental interception-based proxy with CAPTCHA support and broad site compatibility.
+The proxy is custom-built using **Fastify** and runs entirely server-side. It handles:
 
-**Supported sites include:**
-- Google, YouTube, Reddit
-- Twitter / X, Instagram, Discord
-- Spotify, GeForce NOW
-- And most of the open web
-
-> **Note:** For CAPTCHA-dependent sites and YouTube to work reliably, avoid hosting on datacenter IPs. Heavy traffic on a single IP may degrade some sites — consider rotating IPs or routing through Wireguard via [wireproxy](https://github.com/whyvl/wireproxy).
+- Full HTML rewriting — rewrites `src`, `href`, `srcset`, `action`, and `style` attributes to route through the proxy
+- CSS rewriting — rewrites `url()` references in stylesheets and inline styles
+- JS interception — injects hooks for `fetch`, `XMLHttpRequest`, `history.pushState`, and click/form/keydown events so all navigation stays inside the proxy
+- CSP stripping — removes Content-Security-Policy meta tags from proxied pages
+- Two routes:
+  - `/proxy/` — full page proxy with HTML rewrite + script injection
+  - `/proxy/fetch` — asset proxy for images, scripts, stylesheets, fonts
 
 ---
 
 ## Setup
 
-Requires **Node.js 16+** and **Git**.
-
-### Quick start (Debian / Ubuntu)
+Requires **Node.js 16+**.
 
 ```bash
-sudo apt update && sudo apt upgrade
-sudo apt install curl git nginx
-
-# Install nvm + Node 20
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-nvm install 20 && nvm use 20
-
-# Clone and install
-git clone https://github.com/MercuryWorkshop/Scramjet-App
-cd Scramjet-App
-pnpm install
-pnpm start
+git clone <your-repo-url>
+cd <your-repo>
+npm install
+npm start
 ```
 
-The server will start on port `8080` by default. Set the `PORT` environment variable to change it.
-
----
-
-## Transport Layer
-
-The proxy uses [libcurl-transport](https://github.com/MercuryWorkshop/libcurl-transport) to fetch proxied data over an encrypted channel. You can swap this for [epoxy-transport](https://github.com/MercuryWorkshop/epoxy-transport) depending on your needs.
-
-The Wisp server uses [@mercuryworkshop/wisp-js](https://www.npmjs.com/package/@mercuryworkshop/wisp-js). For production deployments, [wisp-server-python](https://github.com/MercuryWorkshop/wisp-server-python) is recommended for better performance and stability.
-
-See [bare-mux](https://github.com/MercuryWorkshop/bare-mux) docs for full transport configuration options.
-
----
-
-## Self-Hosting Resources
-
-- [nvm — Node version manager](https://github.com/nvm-sh/nvm)
-- [Nginx setup guide](https://docs.titaniumnetwork.org/guides/nginx/)
-- [VPS hosting guide](https://docs.titaniumnetwork.org/guides/vps-hosting/)
-- [DNS setup guide](https://docs.titaniumnetwork.org/guides/dns-setup/)
+The server runs on port `8080` by default. Set the `PORT` environment variable to override.
 
 ---
 
@@ -75,26 +44,30 @@ See [bare-mux](https://github.com/MercuryWorkshop/bare-mux) docs for full transp
 
 | App | Description |
 |---|---|
-| Browser | Full proxy browser with search engine picker and nav history |
-| Files | Personal file system with text editor |
-| Terminal | Command-line interface with basic shell commands |
-| Calculator | Keyboard-supported calculator |
-| YouTube | Browse and watch YouTube via proxy |
-| TikTok | Search and browse TikTok content |
-| Search | Native search with result cards |
-| Admin Panel | Owner-only user management (ban, kick, delete) |
+| Browser | Proxy browser with search engine picker, back/forward, and nav history |
+| Files | Personal file system with a built-in text editor |
+| Terminal | Shell-style terminal with basic commands (`help`, `ls`, `whoami`, `date`, `echo`, `clear`) |
+| Calculator | Full calculator with keyboard support |
+| YouTube | Browse and watch YouTube |
+| TikTok | Search and browse TikTok |
+| Search | Native web search with clickable result cards |
+| Admin Panel | Owner-only panel to ban, kick, and delete users |
 
 ---
 
 ## Auth System
 
-- Owner account with hardcoded credentials (set in `public/index.js`)
-- User registration and login stored in `localStorage`
-- Guest access available
-- Owner can ban, kick, or delete any registered user
+- One hardcoded **owner** account with full admin access
+- Users can register and log in — accounts stored in `localStorage`
+- Guest login available (no account needed)
+- Owner can ban, kick, or delete any registered user from the Admin Panel
+- Banned and kicked users are blocked on next login
 
 ---
 
-## Built by Mercury Workshop
+## Stack
 
-> Scramjet updates and future development: [browser.js](https://github.com/HeyPuter/browser.js)
+- **Runtime:** Node.js
+- **Server:** Fastify + @fastify/static
+- **Proxy:** Custom-built HTML/CSS/JS rewriter
+- **Frontend:** Vanilla JS — no frameworks
