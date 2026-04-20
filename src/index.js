@@ -6,26 +6,17 @@ import fastifyStatic from "@fastify/static";
 
 const publicPath = fileURLToPath(new URL("../public/", import.meta.url));
 
-// No COOP/COEP in serverFactory — we scope them per-route via onSend hook
 const fastify = Fastify({
   serverFactory: (handler) => {
     return createServer().on("request", (req, res) => {
+      res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+      res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
       handler(req, res);
     });
   },
 });
 
 fastify.register(fastifyStatic, { root: publicPath, decorateReply: true });
-
-// Only set strict isolation headers on non-proxy routes (main page, static assets)
-fastify.addHook("onSend", (req, reply, payload, done) => {
-  const url = req.url || "";
-  if (!url.startsWith("/proxy/")) {
-    reply.header("Cross-Origin-Opener-Policy", "same-origin");
-    reply.header("Cross-Origin-Embedder-Policy", "require-corp");
-  }
-  done(null, payload);
-});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -252,15 +243,10 @@ fastify.get("/proxy/", async (req, reply) => {
     if (/<head[\s>]/i.test(html)) html = html.replace(/<head(\s[^>]*)?>/i, m => m + inject);
     else html = inject + html;
 
-    // Strip all headers that would block iframe rendering
     reply.removeHeader("x-frame-options");
     reply.removeHeader("content-security-policy");
     reply.removeHeader("content-encoding");
     reply.removeHeader("transfer-encoding");
-    // Allow this proxied page to load inside our iframe without strict isolation
-    reply.header("Cross-Origin-Embedder-Policy", "unsafe-none");
-    reply.header("Cross-Origin-Opener-Policy", "unsafe-none");
-    reply.header("Cross-Origin-Resource-Policy", "cross-origin");
     reply.header("content-type", "text/html; charset=utf-8");
     return reply.send(html);
   } catch (err) {
@@ -302,8 +288,6 @@ fastify.get("/proxy/fetch", async (req, reply) => {
     reply.header("access-control-allow-origin", "*");
     reply.header("access-control-allow-headers", "*");
     reply.header("cross-origin-resource-policy", "cross-origin");
-    reply.header("Cross-Origin-Embedder-Policy", "unsafe-none");
-    reply.header("Cross-Origin-Opener-Policy", "unsafe-none");
 
     if (ct.includes("text/css") || url.match(/\.css(\?|$)/i)) {
       return reply.send(rewriteCss(await res.text(), url));
