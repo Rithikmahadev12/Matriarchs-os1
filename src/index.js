@@ -53,17 +53,6 @@ async function doFetch(url, accept, extra = {}) {
   } finally { clearTimeout(t); }
 }
 
-// Try a list of async fetchers, return first success
-async function tryAll(fetchers) {
-  for (const fn of fetchers) {
-    try {
-      const result = await fn();
-      if (result !== null && result !== undefined) return result;
-    } catch(e) { /* try next */ }
-  }
-  return null;
-}
-
 function toFetch(url, base) {
   if (!url) return url;
   let u = url.trim();
@@ -205,57 +194,12 @@ function makeInjection(origin, base) {
 </script>`;
 }
 
-// Shown when a site blocks iframes / proxy
-function blockedPage(url) {
-  const hostname = (() => { try { return new URL(url).hostname; } catch { return url; } })();
-  return `<!DOCTYPE html><html><head><title>Site Blocked Proxy</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:monospace;background:#0a0e0a;color:#ccc;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:32px}
-  .card{background:#0f180f;border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:36px 40px;max-width:480px;width:100%;text-align:center}
-  .icon{font-size:36px;margin-bottom:16px}
-  h2{color:#e8e8e8;font-size:16px;margin-bottom:8px;letter-spacing:0.05em}
-  p{color:#777;font-size:12px;line-height:1.7;margin-bottom:20px}
-  .host{color:#a0c4a0;font-size:13px;margin-bottom:20px;padding:8px 14px;background:rgba(255,255,255,0.04);border-radius:5px;display:inline-block}
-  .actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
-  a{display:inline-block;padding:8px 18px;border-radius:5px;font-family:monospace;font-size:11px;text-decoration:none;cursor:pointer}
-  .open{background:#1a3a1a;color:#8fc98f;border:1px solid rgba(143,201,143,0.3)}
-  .open:hover{background:#1f441f}
-  .back{background:rgba(255,255,255,0.06);color:#aaa;border:1px solid rgba(255,255,255,0.1)}
-  .back:hover{background:rgba(255,255,255,0.1)}
-</style>
-</head><body>
-<div class="card">
-  <div class="icon">🚫</div>
-  <h2>SITE REFUSES PROXY</h2>
-  <div class="host">${hostname}</div>
-  <p>This site sends headers that block it from loading inside a proxy frame. This is a restriction set by the site itself and cannot be bypassed.</p>
-  <div class="actions">
-    <a class="open" href="${url}" target="_blank" rel="noopener">Open Directly ↗</a>
-    <a class="back" onclick="history.back()">← Go Back</a>
-  </div>
-</div>
-</body></html>`;
-}
-
 function errorPage(msg, url) {
   return `<!DOCTYPE html><html><head><title>Proxy Error</title>
 <style>body{font-family:monospace;background:#0a0a0a;color:#ff6b6b;padding:40px;margin:0}
 p{color:#aaa;margin:4px 0}.url{color:#555;font-size:11px;margin-top:16px}</style>
 </head><body><h2>Proxy Error</h2><p>${msg}</p><p class="url">${url}</p></body></html>`;
 }
-
-// Sites known to block iframe/proxy — show blocked page immediately
-const IFRAME_BLOCKED_HOSTS = new Set([
-  "search.brave.com", "brave.com",
-  "www.bing.com", "bing.com",
-  "www.google.com", "google.com",
-  "duckduckgo.com", "www.duckduckgo.com",
-  "accounts.google.com",
-  "www.facebook.com", "facebook.com",
-  "twitter.com", "x.com",
-  "www.linkedin.com", "linkedin.com",
-]);
 
 // ── PROXY PAGE ────────────────────────────────────────────────────────────────
 
@@ -266,12 +210,6 @@ fastify.get("/proxy/", async (req, reply) => {
   try { targetUrl = new URL(target); } catch { return reply.code(400).send("Invalid URL"); }
   if (isBlocked(targetUrl.hostname)) return reply.code(403).send("Blocked");
 
-  // Show blocked page immediately for known iframe-blocking sites
-  if (IFRAME_BLOCKED_HOSTS.has(targetUrl.hostname)) {
-    reply.header("content-type", "text/html; charset=utf-8");
-    return reply.send(blockedPage(targetUrl.toString()));
-  }
-
   try {
     const res = await doFetch(targetUrl.toString(),
       "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -279,19 +217,6 @@ fastify.get("/proxy/", async (req, reply) => {
 
     const ct = res.headers.get("content-type") || "";
     const finalUrl = targetUrl.toString();
-
-    // Check if server is sending x-frame-options / CSP frame-ancestors
-    const xfo = res.headers.get("x-frame-options") || "";
-    const csp = res.headers.get("content-security-policy") || "";
-    if (
-      xfo.toLowerCase().includes("deny") ||
-      xfo.toLowerCase().includes("sameorigin") ||
-      csp.includes("frame-ancestors 'none'") ||
-      csp.includes("frame-ancestors 'self'")
-    ) {
-      reply.header("content-type", "text/html; charset=utf-8");
-      return reply.send(blockedPage(finalUrl));
-    }
 
     if (ct && !ct.includes("text/html") && !ct.includes("xhtml")) {
       return reply.redirect("/proxy/fetch?url=" + encodeURIComponent(target));
@@ -401,129 +326,94 @@ fastify.get("/api/youtube/search", async (req, reply) => {
   if (!q.trim()) return reply.send({ results: [] });
   try {
     const data = await invidiousFetch(`/api/v1/search?q=${encodeURIComponent(q)}&type=video&page=1`);
-    if (!data || !Array.isArray(data)) return reply.send({ error: "No results from any instance" });
-    const results = data.filter(v => v.type === "video").map(v => ({
-      videoId:         v.videoId,
-      title:           v.title,
-      author:          v.author,
-      viewCount:       v.viewCount,
-      lengthSeconds:   v.lengthSeconds,
+    if (!data || !Array.isArray(data)) return reply.send({ error: "No results" });
+    reply.send({ results: data.filter(v => v.type === "video").map(v => ({
+      videoId: v.videoId, title: v.title, author: v.author,
+      viewCount: v.viewCount, lengthSeconds: v.lengthSeconds,
       videoThumbnails: v.videoThumbnails || [],
-    }));
-    reply.send({ results });
-  } catch(err) {
-    reply.send({ error: err.message });
-  }
+    }))});
+  } catch(err) { reply.send({ error: err.message }); }
 });
 
 fastify.get("/api/youtube/trending", async (req, reply) => {
   try {
     const data = await invidiousFetch(`/api/v1/trending?type=default&region=US`);
-    if (!data || !Array.isArray(data)) return reply.send({ error: "No results from any instance" });
-    const results = data.map(v => ({
-      videoId:         v.videoId,
-      title:           v.title,
-      author:          v.author,
-      viewCount:       v.viewCount,
-      lengthSeconds:   v.lengthSeconds,
+    if (!data || !Array.isArray(data)) return reply.send({ error: "No results" });
+    reply.send({ results: data.map(v => ({
+      videoId: v.videoId, title: v.title, author: v.author,
+      viewCount: v.viewCount, lengthSeconds: v.lengthSeconds,
       videoThumbnails: v.videoThumbnails || [],
-    }));
-    reply.send({ results });
-  } catch(err) {
-    reply.send({ error: err.message });
+    }))});
+  } catch(err) { reply.send({ error: err.message }); }
+});
+
+// ── TIKTOK — ProxiTok via proxy iframe ───────────────────────────────────────
+// We don't scrape TikTok directly (always blocked server-side).
+// Instead we find a live ProxiTok instance and load it through our own proxy.
+// The frontend TikTok app becomes an iframe pointing at /proxy/?url=<proxitok>
+
+const PROXITOK_INSTANCES = [
+  "https://proxitok.pabloferreiro.es",
+  "https://proxitok.pussthecat.org",
+  "https://tok.habedieeh.re",
+  "https://proxitok.privacydev.net",
+  "https://tok.artemislena.eu",
+  "https://tok.adminforge.de",
+  "https://cringe.whatever.social",
+  "https://proxitok.lunar.icu",
+  "https://proxitok.privacy.com.de",
+  "https://tt.opnxng.com",
+  "https://proxitok.r4fo.com",
+];
+
+let cachedInstance = null;
+let cachedAt = 0;
+const CACHE_TTL = 5 * 60 * 1000;
+
+async function getWorkingProxiTok() {
+  if (cachedInstance && (Date.now() - cachedAt) < CACHE_TTL) return cachedInstance;
+  for (const base of PROXITOK_INSTANCES) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 4000);
+      const res = await fetch(base + "/", { signal: ctrl.signal, redirect: "follow" });
+      clearTimeout(t);
+      if (res.status < 500) {
+        cachedInstance = base;
+        cachedAt = Date.now();
+        console.log("ProxiTok instance:", base);
+        return base;
+      }
+    } catch(e) { /* try next */ }
   }
+  // Return first as last resort
+  return PROXITOK_INSTANCES[0];
+}
+
+// Returns proxied URLs the frontend iframe should load
+fastify.get("/api/tiktok/instance", async (req, reply) => {
+  const instance = await getWorkingProxiTok();
+  reply.send({
+    instance,
+    proxied: "/proxy/?url=" + encodeURIComponent(instance + "/"),
+  });
 });
 
-// ── TIKTOK API ────────────────────────────────────────────────────────────────
-
-// TikTok via RapidAPI-style public scrapers — no key needed, best effort
-function normalizeTikTokItem(v) {
-  const id = v.id || v.videoId || v.aweme_id || "";
-  return {
-    videoId:           id,
-    video_description: v.desc || v.title || v.video_description || v.share_desc || "",
-    username:          v.author?.uniqueId || v.author?.nickname || v.username || v.nickname || "",
-    like_count:        v.stats?.diggCount ?? v.statistics?.digg_count ?? v.like_count ?? 0,
-    view_count:        v.stats?.playCount ?? v.statistics?.play_count ?? v.view_count ?? 0,
-    cover_image_url:   v.video?.cover || v.video?.dynamicCover || v.cover_image_url || v.video?.origin_cover || "",
-    embed_link:        id ? `https://www.tiktok.com/embed/v2/${id}` : "",
-  };
-}
-
-// Scrape TikTok trending page for video IDs
-async function scrapeTikTokTrending() {
-  const res = await doFetch("https://www.tiktok.com/trending", "text/html", {
-    "Referer": "https://www.tiktok.com/",
-    "Origin":  "https://www.tiktok.com",
-  });
-  const html = await res.text();
-  // Extract __UNIVERSAL_DATA_FOR_REHYDRATION__ or itemList from page
-  const match = html.match(/"itemList"\s*:\s*(\[[\s\S]{100,50000}?\])\s*[,}]/);
-  if (!match) return null;
-  const list = JSON.parse(match[1]);
-  return list.map(normalizeTikTokItem).filter(v => v.videoId);
-}
-
-// Scrape TikTok search
-async function scrapeTikTokSearch(q) {
-  const url = `https://www.tiktok.com/search/video?q=${encodeURIComponent(q)}`;
-  const res = await doFetch(url, "text/html", {
-    "Referer": "https://www.tiktok.com/",
-  });
-  const html = await res.text();
-  const match = html.match(/"itemList"\s*:\s*(\[[\s\S]{100,50000}?\])\s*[,}]/);
-  if (!match) return null;
-  const list = JSON.parse(match[1]);
-  return list.map(normalizeTikTokItem).filter(v => v.videoId);
-}
-
-// Use Nitter-style TikTok open frontend as fallback
-async function tikTokViaApi(q, trending = false) {
-  // Try TikTok's internal app API (often works server-side)
-  const url = trending
-    ? `https://www.tiktok.com/api/recommend/item_list/?count=20&id=1&type=5&secUid=&maxCursor=0&minCursor=0&sourceType=12&appId=1233&region=US&priority_region=&language=en`
-    : `https://www.tiktok.com/api/search/item/full/?keyword=${encodeURIComponent(q)}&offset=0&count=20&from_page=search`;
-  const res = await doFetch(url, "application/json", {
-    "Referer": "https://www.tiktok.com/",
-    "Origin":  "https://www.tiktok.com",
-    "sec-ch-ua": '"Chromium";v="124"',
-    "sec-fetch-site": "same-origin",
-  });
-  const text = await res.text();
-  if (!text || text.trim().startsWith("<")) return null;
-  const data = JSON.parse(text);
-  const list = data.itemList || data.item_list || [];
-  if (!list.length) return null;
-  return list.map(normalizeTikTokItem).filter(v => v.videoId);
-}
-
-fastify.get("/api/tiktok/trending", async (req, reply) => {
-  const videos = await tryAll([
-    () => tikTokViaApi("", true),
-    () => scrapeTikTokTrending(),
-  ]);
-  if (videos && videos.length) return reply.send({ data: { videos } });
-  // Last resort: return curated static popular creators' embed links
-  reply.send({ data: { videos: [] }, error: "TikTok trending unavailable — try searching instead" });
+fastify.get("/api/tiktok/trending-url", async (req, reply) => {
+  const instance = await getWorkingProxiTok();
+  reply.send({ proxied: "/proxy/?url=" + encodeURIComponent(instance + "/trending") });
 });
 
-fastify.get("/api/tiktok/search", async (req, reply) => {
+fastify.get("/api/tiktok/search-url", async (req, reply) => {
   const q = req.query.q || "";
-  if (!q.trim()) return reply.send({ data: { videos: [] } });
-  const videos = await tryAll([
-    () => tikTokViaApi(q, false),
-    () => scrapeTikTokSearch(q),
-  ]);
-  if (videos && videos.length) return reply.send({ data: { videos } });
-  reply.send({ data: { videos: [] }, error: "TikTok search unavailable — TikTok is blocking server-side requests. Try the Browser app and navigate to tiktok.com directly." });
+  const instance = await getWorkingProxiTok();
+  reply.send({ proxied: "/proxy/?url=" + encodeURIComponent(instance + "/search/videos?q=" + encodeURIComponent(q)) });
 });
 
 // ── SEARCH API ────────────────────────────────────────────────────────────────
 
-// Parse DuckDuckGo HTML results
 function parseDDG(html) {
   const results = [];
-  // Match result blocks
   const blockRe = /<div[^>]+class="[^"]*result[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi;
   const titleLinkRe = /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i;
   const snippetRe = /<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/i;
@@ -540,13 +430,11 @@ function parseDDG(html) {
     } catch {}
     if (!url || url.includes("duckduckgo.com")) continue;
     const snip = snippetRe.exec(content);
-    const snippet = snip ? snip[1].replace(/<[^>]+>/g, "").trim() : "";
-    results.push({ title, url, snippet });
+    results.push({ title, url, snippet: snip ? snip[1].replace(/<[^>]+>/g, "").trim() : "" });
   }
   return results;
 }
 
-// Parse Bing HTML results as fallback
 function parseBing(html) {
   const results = [];
   const re = /<li[^>]+class="[^"]*b_algo[^"]*"[^>]*>([\s\S]*?)<\/li>/gi;
@@ -554,14 +442,12 @@ function parseBing(html) {
   const snippetRe = /<p[^>]*>([\s\S]*?)<\/p>/i;
   let m;
   while ((m = re.exec(html)) !== null && results.length < 10) {
-    const block = m[1];
-    const t = titleRe.exec(block);
+    const t = titleRe.exec(m[1]);
     if (!t) continue;
+    const s = snippetRe.exec(m[1]);
     const url = t[1];
-    const title = t[2].replace(/<[^>]+>/g, "").trim();
-    const s = snippetRe.exec(block);
-    const snippet = s ? s[1].replace(/<[^>]+>/g, "").trim() : "";
-    if (url && !url.startsWith("javascript:")) results.push({ title, url, snippet });
+    if (url && !url.startsWith("javascript:"))
+      results.push({ title: t[2].replace(/<[^>]+>/g,"").trim(), url, snippet: s ? s[1].replace(/<[^>]+>/g,"").trim() : "" });
   }
   return results;
 }
@@ -570,32 +456,26 @@ fastify.get("/api/search", async (req, reply) => {
   const q = req.query.q || "";
   if (!q.trim()) return reply.send({ results: [] });
 
-  // Try DDG HTML first
-  const results = await tryAll([
-    async () => {
-      const res = await doFetch(
-        `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`,
-        "text/html,application/xhtml+xml,*/*",
-        { "Referer": "https://duckduckgo.com/", "Accept-Encoding": "identity" }
-      );
+  for (const [fetchUrl, parser, extraHeaders] of [
+    [
+      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`,
+      parseDDG,
+      { "Referer": "https://duckduckgo.com/", "Accept-Encoding": "identity" },
+    ],
+    [
+      `https://www.bing.com/search?q=${encodeURIComponent(q)}&form=QBLH`,
+      parseBing,
+      { "Referer": "https://www.bing.com/" },
+    ],
+  ]) {
+    try {
+      const res = await doFetch(fetchUrl, "text/html,*/*", extraHeaders);
       const html = await res.text();
-      const r = parseDDG(html);
-      return r.length ? r : null;
-    },
-    // Fallback: Bing
-    async () => {
-      const res = await doFetch(
-        `https://www.bing.com/search?q=${encodeURIComponent(q)}&form=QBLH`,
-        "text/html,*/*",
-        { "Referer": "https://www.bing.com/" }
-      );
-      const html = await res.text();
-      const r = parseBing(html);
-      return r.length ? r : null;
-    },
-  ]);
+      const results = parser(html);
+      if (results.length) return reply.send({ results });
+    } catch(e) { /* try next */ }
+  }
 
-  if (results && results.length) return reply.send({ results });
   reply.send({ results: [], error: "No results found" });
 });
 
