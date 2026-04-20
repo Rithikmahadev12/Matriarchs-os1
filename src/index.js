@@ -1,6 +1,5 @@
 import { createServer } from "node:http";
 import { fileURLToPath } from "url";
-import { hostname } from "node:os";
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 
@@ -9,8 +8,11 @@ const publicPath = fileURLToPath(new URL("../public/", import.meta.url));
 const fastify = Fastify({
   serverFactory: (handler) => {
     return createServer().on("request", (req, res) => {
-      res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
-      res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+      // Only set COOP/COEP on non-proxy routes so iframes aren't broken
+      if (!req.url?.startsWith("/proxy/")) {
+        res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+        res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+      }
       handler(req, res);
     });
   },
@@ -20,13 +22,15 @@ fastify.register(fastifyStatic, { root: publicPath, decorateReply: true });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const BLOCKED = new Set(["localhost","127.0.0.1","0.0.0.0","::1","169.254.169.254"]);
+const BLOCKED = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1", "169.254.169.254"]);
 function isBlocked(h) {
   return BLOCKED.has(h) || h.endsWith(".internal") || h.endsWith(".local");
 }
 
-const DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-const MOBILE_UA  = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
+const DESKTOP_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const MOBILE_UA =
+  "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
 
 function getUA(url) {
   try {
@@ -40,117 +44,181 @@ function isTikTokHost(url) {
   try {
     const host = new URL(url).hostname;
     return host.includes("tiktok.com") || host.includes("tiktokcdn.com") || host.includes("tiktokv.com");
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
-async function doFetch(url, accept, extra) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 20000);
+function buildHeaders(url, accept, extra = {}) {
+  let targetOrigin;
+  try { targetOrigin = new URL(url).origin; } catch { targetOrigin = ""; }
 
-  const tikTok = isTikTokHost(url);
-  const tikTokHeaders = tikTok ? {
-    "Referer": "https://www.tiktok.com/",
-    "Origin": "https://www.tiktok.com",
+  const base = {
+    "User-Agent": getUA(url),
+    "Accept": accept || "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Upgrade-Insecure-Requests": "1",
     "Sec-Fetch-Dest": "document",
     "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-Site": "none",
     "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124"',
-    "sec-ch-ua-mobile": "?1",
-    "sec-ch-ua-platform": '"Android"',
-  } : {};
+    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+  };
 
+  if (isTikTokHost(url)) {
+    Object.assign(base, {
+      "Referer": "https://www.tiktok.com/",
+      "Origin": "https://www.tiktok.com",
+      "Sec-Fetch-Site": "same-origin",
+      "sec-ch-ua-mobile": "?1",
+      "sec-ch-ua-platform": '"Android"',
+    });
+  }
+
+  return { ...base, ...extra };
+}
+
+async function doFetch(url, accept, extra = {}) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 20000);
   try {
     return await fetch(url, {
       signal: ctrl.signal,
       redirect: "follow",
-      headers: {
-        "User-Agent": getUA(url),
-        "Accept-Language": "en-US,en;q=0.9",
-        "Cache-Control": "no-cache",
-        "Accept": accept || "*/*",
-        ...tikTokHeaders,
-        ...extra,
-      },
+      headers: buildHeaders(url, accept, extra),
     });
-  } finally { clearTimeout(t); }
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 function toFetch(url, base) {
   if (!url) return url;
   let u = url.trim();
-  if (!u || u.startsWith("data:") || u.startsWith("#") || u.startsWith("javascript:") ||
-      u.startsWith("mailto:") || u.startsWith("blob:") || u.startsWith("about:") ||
-      u.startsWith("/proxy/")) return u;
-  if (u.startsWith("//")) { try { u = new URL(base).protocol + u; } catch {} }
-  try { return "/proxy/fetch?url=" + encodeURIComponent(new URL(u, base).toString()); }
-  catch { return url; }
+  if (
+    !u ||
+    u.startsWith("data:") ||
+    u.startsWith("#") ||
+    u.startsWith("javascript:") ||
+    u.startsWith("mailto:") ||
+    u.startsWith("blob:") ||
+    u.startsWith("about:") ||
+    u.startsWith("/proxy/")
+  )
+    return u;
+  if (u.startsWith("//")) {
+    try { u = new URL(base).protocol + u; } catch {}
+  }
+  try {
+    return "/proxy/fetch?url=" + encodeURIComponent(new URL(u, base).toString());
+  } catch {
+    return url;
+  }
 }
 
 function toPage(url, base) {
   if (!url) return url;
   let u = url.trim();
-  if (!u || u.startsWith("data:") || u.startsWith("#") || u.startsWith("javascript:") ||
-      u.startsWith("mailto:") || u.startsWith("blob:") || u.startsWith("about:") ||
-      u.startsWith("/proxy/")) return u;
-  if (u.startsWith("//")) { try { u = new URL(base).protocol + u; } catch {} }
-  try { return "/proxy/?url=" + encodeURIComponent(new URL(u, base).toString()); }
-  catch { return url; }
+  if (
+    !u ||
+    u.startsWith("data:") ||
+    u.startsWith("#") ||
+    u.startsWith("javascript:") ||
+    u.startsWith("mailto:") ||
+    u.startsWith("blob:") ||
+    u.startsWith("about:") ||
+    u.startsWith("/proxy/")
+  )
+    return u;
+  if (u.startsWith("//")) {
+    try { u = new URL(base).protocol + u; } catch {}
+  }
+  try {
+    return "/proxy/?url=" + encodeURIComponent(new URL(u, base).toString());
+  } catch {
+    return url;
+  }
 }
 
 function rewriteCss(css, base) {
   return css.replace(/url\(\s*(['"]?)((?!data:)[^'"\)]+)\1\s*\)/gi, (m, q, u) => {
-    try { return `url(${q}/proxy/fetch?url=${encodeURIComponent(new URL(u.trim(), base).toString())}${q})`; }
-    catch { return m; }
+    try {
+      return `url(${q}/proxy/fetch?url=${encodeURIComponent(new URL(u.trim(), base).toString())}${q})`;
+    } catch {
+      return m;
+    }
   });
 }
 
 function rewriteHtml(html, base) {
-  // Remove CSP
+  // Remove CSP meta tags
   html = html.replace(/<meta[^>]+http-equiv=["']Content-Security-Policy["'][^>]*\/?>/gi, "");
+  // Remove referrer policy that might block loads
+  html = html.replace(/<meta[^>]+http-equiv=["']referrer["'][^>]*\/?>/gi, "");
 
-  // <link> tags — stylesheets to fetch proxy, nav links to page proxy
+  // <link> tags
   html = html.replace(/<link(\s[^>]*)>/gi, (tag, attrs) => {
     const isStyle = /rel=["'][^"']*\b(stylesheet|preload)\b[^"']*["']/i.test(attrs);
     attrs = attrs.replace(/\shref\s*=\s*(["'])([^"']+)\1/gi, (m, q, url) => {
-      if (!url || url.startsWith("data:") || url.startsWith("#") || url.startsWith("javascript:")) return m;
+      if (!url || url.startsWith("data:") || url.startsWith("#") || url.startsWith("javascript:"))
+        return m;
       return ` href=${q}${isStyle ? toFetch(url, base) : toPage(url, base)}${q}`;
     });
     return `<link${attrs}>`;
   });
 
-  // src= attributes
+  // src=
   html = html.replace(/\bsrc\s*=\s*(["'])(.*?)\1/gi, (m, q, url) =>
-    url ? `src=${q}${toFetch(url, base)}${q}` : m);
+    url ? `src=${q}${toFetch(url, base)}${q}` : m
+  );
 
-  // href= on non-link tags
+  // href= (non-link tags)
   html = html.replace(/(<(?!link\b)[a-z][^>]*?)\shref\s*=\s*(["'])([^"']+)\2/gi, (m, pre, q, url) => {
-    if (!url || url.startsWith("data:") || url.startsWith("#") || url.startsWith("javascript:") ||
-        url.startsWith("mailto:") || url.startsWith("/proxy/")) return m;
+    if (
+      !url ||
+      url.startsWith("data:") ||
+      url.startsWith("#") ||
+      url.startsWith("javascript:") ||
+      url.startsWith("mailto:") ||
+      url.startsWith("/proxy/")
+    )
+      return m;
     return `${pre} href=${q}${toPage(url, base)}${q}`;
   });
 
-  // action= forms
+  // action=
   html = html.replace(/\baction\s*=\s*(["'])(.*?)\1/gi, (m, q, url) =>
-    url ? `action=${q}${toPage(url, base)}${q}` : m);
+    url ? `action=${q}${toPage(url, base)}${q}` : m
+  );
 
   // srcset=
   html = html.replace(/\bsrcset\s*=\s*(["'])(.*?)\1/gi, (m, q, srcset) => {
-    const rw = srcset.split(",").map(part => {
-      const t = part.trim(), si = t.search(/\s/);
-      return si === -1 ? toFetch(t, base) : toFetch(t.slice(0, si), base) + t.slice(si);
-    }).join(", ");
+    const rw = srcset
+      .split(",")
+      .map((part) => {
+        const t = part.trim(), si = t.search(/\s/);
+        return si === -1 ? toFetch(t, base) : toFetch(t.slice(0, si), base) + t.slice(si);
+      })
+      .join(", ");
     return `srcset=${q}${rw}${q}`;
   });
 
   // <style> blocks
-  html = html.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/gi,
-    (m, o, css, c) => o + rewriteCss(css, base) + c);
+  html = html.replace(
+    /(<style[^>]*>)([\s\S]*?)(<\/style>)/gi,
+    (m, o, css, c) => o + rewriteCss(css, base) + c
+  );
 
   // inline style=
-  html = html.replace(/\bstyle\s*=\s*(["'])(.*?)\1/gi,
-    (m, q, css) => `style=${q}${rewriteCss(css, base)}${q}`);
+  html = html.replace(
+    /\bstyle\s*=\s*(["'])(.*?)\1/gi,
+    (m, q, css) => `style=${q}${rewriteCss(css, base)}${q}`
+  );
 
   return html;
 }
@@ -159,7 +227,6 @@ function makeInjection(origin, base) {
   return `<script>
 (function(){
   var _b=${JSON.stringify(base)},_lo=location.origin;
-  // Form submit interceptor
   document.addEventListener('submit',function(e){
     var f=e.target;
     if(!f||(f.method||'get').toLowerCase()==='post')return;
@@ -173,7 +240,6 @@ function makeInjection(origin, base) {
     var qs=new URLSearchParams(new FormData(f)).toString();
     top.location.href='/proxy/?url='+encodeURIComponent(abs+(abs.includes('?')?'&':'?')+qs);
   },true);
-  // Enter key in inputs
   document.addEventListener('keydown',function(e){
     if(e.key!=='Enter')return;
     var el=e.target;
@@ -192,7 +258,6 @@ function makeInjection(origin, base) {
       }
     }
   },true);
-  // Click interceptor
   document.addEventListener('click',function(e){
     var el=e.target;
     while(el&&el.tagName!=='A')el=el.parentElement;
@@ -201,7 +266,6 @@ function makeInjection(origin, base) {
     if(!href||href.startsWith('#')||href.startsWith('javascript:')||href.startsWith('mailto:')||href.startsWith('blob:')||href.indexOf('/proxy/')!==-1)return;
     try{var u=new URL(href);if(u.origin===_lo)return;e.preventDefault();e.stopPropagation();top.location.href='/proxy/?url='+encodeURIComponent(u.toString());}catch(err){}
   },true);
-  // fetch hook
   var _f=window.fetch;
   window.fetch=function(input,init){
     try{
@@ -213,7 +277,6 @@ function makeInjection(origin, base) {
     }catch(e){}
     return _f(input,init);
   };
-  // XHR hook
   var _xo=XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open=function(m,url){
     try{
@@ -224,7 +287,6 @@ function makeInjection(origin, base) {
     }catch(e){}
     return _xo.apply(this,arguments);
   };
-  // history hook
   var _pp=history.pushState,_rp=history.replaceState;
   history.pushState=function(s,t,url){_pp.apply(this,arguments);try{top.postMessage({type:'mos-nav',url:new URL(url||'',_b).toString()},'*');}catch(e){}};
   history.replaceState=function(s,t,url){_rp.apply(this,arguments);try{top.postMessage({type:'mos-nav',url:new URL(url||'',_b).toString()},'*');}catch(e){}};
@@ -234,9 +296,19 @@ function makeInjection(origin, base) {
 
 function errorPage(msg, url) {
   return `<!DOCTYPE html><html><head><title>Proxy Error</title>
-<style>body{font-family:monospace;background:#0a0a0a;color:#ff6b6b;padding:40px;margin:0}
-p{color:#aaa;margin:4px 0}.url{color:#555;font-size:11px;margin-top:16px}</style>
-</head><body><h2>Proxy Error</h2><p>${msg}</p><p class="url">${url}</p></body></html>`;
+<style>
+  body{font-family:monospace;background:#07100a;color:#ceefd4;padding:40px;margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;height:80vh;gap:12px}
+  h2{color:#ff6b6b;letter-spacing:0.1em}
+  p{color:#4a6650;margin:0;font-size:12px}
+  .url{color:#2a3d2e;font-size:10px;margin-top:8px;word-break:break-all;max-width:500px;text-align:center}
+  a{color:#7a9e7e;font-size:11px;margin-top:16px}
+</style>
+</head><body>
+  <h2>⬡ Proxy Error</h2>
+  <p>${msg.replace(/</g,"&lt;")}</p>
+  <p class="url">${url.replace(/</g,"&lt;")}</p>
+  <a href="javascript:history.back()">← Go back</a>
+</body></html>`;
 }
 
 // ── PROXY PAGE ────────────────────────────────────────────────────────────────
@@ -244,14 +316,21 @@ p{color:#aaa;margin:4px 0}.url{color:#555;font-size:11px;margin-top:16px}</style
 fastify.get("/proxy/", async (req, reply) => {
   const target = req.query.url;
   if (!target) return reply.code(400).send("Missing ?url=");
+
   let targetUrl;
-  try { targetUrl = new URL(target); } catch { return reply.code(400).send("Invalid URL"); }
-  if (isBlocked(targetUrl.hostname)) return reply.code(403).send("Blocked");
+  try { targetUrl = new URL(target); } catch {
+    return reply.code(400).type("text/html").send(errorPage("Invalid URL", target));
+  }
+  if (isBlocked(targetUrl.hostname)) {
+    return reply.code(403).type("text/html").send(errorPage("Blocked host", target));
+  }
 
   try {
-    const res = await doFetch(targetUrl.toString(),
+    const res = await doFetch(
+      targetUrl.toString(),
       "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      { "Referer": targetUrl.origin+"/", "Origin": targetUrl.origin, "Upgrade-Insecure-Requests": "1" });
+      { "Referer": targetUrl.origin + "/", "Origin": targetUrl.origin }
+    );
 
     const ct = res.headers.get("content-type") || "";
     const finalUrl = targetUrl.toString();
@@ -261,16 +340,29 @@ fastify.get("/proxy/", async (req, reply) => {
     }
 
     let html = await res.text();
+    if (!html.trim()) {
+      return reply.code(502).type("text/html").send(
+        errorPage("Empty response from server — the site may block proxies", finalUrl)
+      );
+    }
+
     html = rewriteHtml(html, finalUrl);
     const inject = makeInjection(targetUrl.origin, finalUrl);
-    if (/<head[\s>]/i.test(html)) html = html.replace(/<head(\s[^>]*)?>/i, m => m + inject);
-    else html = inject + html;
+    if (/<head[\s>]/i.test(html)) {
+      html = html.replace(/<head(\s[^>]*)?>/i, (m) => m + inject);
+    } else {
+      html = inject + html;
+    }
 
+    // Clear headers that break iframe embedding
     reply.removeHeader("x-frame-options");
     reply.removeHeader("content-security-policy");
     reply.removeHeader("content-encoding");
     reply.removeHeader("transfer-encoding");
+    reply.removeHeader("cross-origin-embedder-policy");
+    reply.removeHeader("cross-origin-opener-policy");
     reply.header("content-type", "text/html; charset=utf-8");
+    reply.header("access-control-allow-origin", "*");
     return reply.send(html);
   } catch (err) {
     console.error("Page proxy error:", err.message);
@@ -283,43 +375,35 @@ fastify.get("/proxy/", async (req, reply) => {
 fastify.get("/proxy/fetch", async (req, reply) => {
   const target = req.query.url;
   if (!target) return reply.code(400).send("Missing ?url=");
+
   let targetUrl;
-  try { targetUrl = new URL(target); } catch { return reply.code(400).send("Invalid URL"); }
+  try { targetUrl = new URL(target); } catch {
+    return reply.code(400).send("Invalid URL");
+  }
   if (isBlocked(targetUrl.hostname)) return reply.code(403).send("Blocked");
 
   try {
     const accept = req.headers["accept"] || "*/*";
-    const tikTok = isTikTokHost(targetUrl.toString());
-    const tikTokHeaders = tikTok ? {
-      "Referer": "https://www.tiktok.com/",
-      "Origin": "https://www.tiktok.com",
-      "Sec-Fetch-Dest": "empty",
-      "Sec-Fetch-Mode": "cors",
-      "Sec-Fetch-Site": "same-origin",
-      "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124"',
-      "sec-ch-ua-mobile": "?1",
-      "sec-ch-ua-platform": '"Android"',
-    } : {};
-
     const res = await fetch(targetUrl.toString(), {
       redirect: "follow",
-      headers: {
-        "User-Agent": getUA(targetUrl.toString()),
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept": accept,
+      headers: buildHeaders(targetUrl.toString(), accept, {
         "Referer": targetUrl.origin + "/",
         "Origin": targetUrl.origin,
-        ...tikTokHeaders,
-      },
+        "Sec-Fetch-Dest": accept.includes("text/css") ? "style" : accept.includes("script") ? "script" : "empty",
+        "Sec-Fetch-Mode": "no-cors",
+        "Sec-Fetch-Site": "cross-site",
+      }),
     });
 
-    const ct  = res.headers.get("content-type") || "application/octet-stream";
+    const ct = res.headers.get("content-type") || "application/octet-stream";
     const url = targetUrl.toString();
 
     reply.removeHeader("x-frame-options");
     reply.removeHeader("content-security-policy");
     reply.removeHeader("content-encoding");
     reply.removeHeader("transfer-encoding");
+    reply.removeHeader("cross-origin-embedder-policy");
+    reply.removeHeader("cross-origin-opener-policy");
     reply.header("content-type", ct);
     reply.header("access-control-allow-origin", "*");
     reply.header("access-control-allow-headers", "*");
@@ -353,7 +437,10 @@ fastify.server.on("listening", () => {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
-function shutdown() { fastify.close(); process.exit(0); }
+function shutdown() {
+  fastify.close();
+  process.exit(0);
+}
 
 let port = parseInt(process.env.PORT || "");
 if (isNaN(port)) port = 8080;
