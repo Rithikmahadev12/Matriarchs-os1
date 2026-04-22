@@ -8,85 +8,58 @@
 // ── Server Providers ─────────────────────────────────────────────────────────
 
 const GAME_PROVIDERS = {
-  "gn-math": {
-    label: "GN-Math",
+  "3kho": {
+    label: "3kh0",
     color: "#7a9e7e",
-    fetchZones: fetchGnMathZones,
+    fetchZones: fetch3khoZones,
   },
-  // Add more providers here:
-  // "cool-math": {
-  //   label: "Cool Math",
-  //   color: "#e07a5f",
-  //   fetchZones: fetchCoolMathZones,
-  // },
 };
 
-// ── GN-Math provider ─────────────────────────────────────────────────────────
+// ── 3kho provider ────────────────────────────────────────────────────────────
+// games.json format: [{ "name": "...", "img": "...", "url": "..." }, ...]
+// img/url may be relative paths like "/projects/slope/index.html"
 
-const GN_COVER_URL = "https://cdn.jsdelivr.net/gh/gn-math/covers@main";
-const GN_HTML_URL  = "https://cdn.jsdelivr.net/gh/gn-math/html@main";
-
-const GN_ZONES_URLS = [
-  "https://cdn.jsdelivr.net/gh/gn-math/assets@main/zones.json",
-  "https://cdn.jsdelivr.net/gh/gn-math/assets@latest/zones.json",
-  "https://cdn.jsdelivr.net/gh/gn-math/assets@master/zones.json",
-  "https://cdn.jsdelivr.net/gh/gn-math/assets/zones.json",
+const THREEKHO_BASE = "https://3kho.github.io";
+const THREEKHO_JSON_URLS = [
+  "https://cdn.jsdelivr.net/gh/3kho/3kho.github.io@main/config/games.json",
+  "https://raw.githubusercontent.com/3kho/3kho.github.io/main/config/games.json",
 ];
 
-async function fetchGnMathZones() {
-  // Try to get the latest commit SHA for cache-busting
-  let zonesUrl = GN_ZONES_URLS[Math.floor(Math.random() * GN_ZONES_URLS.length)];
-  try {
-    const shaRes = await Promise.race([
-      fetch("https://api.github.com/repos/gn-math/assets/commits?t=" + Date.now()),
-      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000)),
-    ]);
-    if (shaRes.ok) {
-      const shaJson = await shaRes.json();
-      const sha = shaJson?.[0]?.sha;
-      // jsdelivr requires short SHAs (8 chars), not full 40-char SHAs
-      if (sha) zonesUrl = `https://cdn.jsdelivr.net/gh/gn-math/assets@${sha.slice(0, 8)}/zones.json`;
+async function fetch3khoZones() {
+  let data = null;
+  let lastErr = null;
+
+  for (const url of THREEKHO_JSON_URLS) {
+    try {
+      const res = await fetch(url + "?t=" + Date.now());
+      if (res.ok) {
+        data = await res.json();
+        break;
+      }
+    } catch (e) {
+      lastErr = e;
     }
-  } catch (_) {}
+  }
 
-  const res = await fetch(zonesUrl + "?t=" + Date.now());
-  if (!res.ok) throw new Error("Failed to fetch zones (" + res.status + ")");
-  const zones = await res.json();
+  if (!data) throw new Error("Failed to fetch 3kho games: " + (lastErr?.message || "unknown"));
 
-  // Fetch popularity data (best-effort)
-  let popularity = {};
-  try {
-    const popRes = await fetch(
-      "https://data.jsdelivr.com/v1/stats/packages/gh/gn-math/html@main/files?period=year"
-    );
-    if (popRes.ok) {
-      const popData = await popRes.json();
-      popData.forEach((file) => {
-        const m = file.name.match(/\/(\d+)\.html$/);
-        if (m) popularity[parseInt(m[1])] = file.hits?.total || 0;
-      });
-    }
-  } catch (_) {}
+  const resolveUrl = (u) => {
+    if (!u) return null;
+    if (u.startsWith("http")) return u;
+    return THREEKHO_BASE + (u.startsWith("/") ? u : "/" + u);
+  };
 
-  return zones.map((z) => ({
-    id:       String(z.id),
-    name:     z.name || "Unknown",
-    author:   z.author || "Unknown",
-    authorLink: z.authorLink || null,
-    featured: !!z.featured,
-    provider: "gn-math",
-    // Resolve cover URL
-    coverUrl: z.cover
-      ? z.cover.replace("{COVER_URL}", GN_COVER_URL).replace("{HTML_URL}", GN_HTML_URL)
-      : null,
-    // Raw content URL (HTML)
-    contentUrl: z.url && !z.url.startsWith("http")
-      ? z.url.replace("{COVER_URL}", GN_COVER_URL).replace("{HTML_URL}", GN_HTML_URL)
-      : null,
-    // External URL (open in browser)
-    externalUrl: z.url && z.url.startsWith("http") ? z.url : null,
-    popularity: popularity[z.id] || 0,
-    tags: z.tags || [],
+  return data.map((g, i) => ({
+    id:          String(i),
+    name:        g.name || "Unknown",
+    author:      "3kh0",
+    featured:    false,
+    provider:    "3kho",
+    coverUrl:    resolveUrl(g.img),
+    contentUrl:  null,
+    externalUrl: resolveUrl(g.url),
+    popularity:  0,
+    tags:        [],
   }));
 }
 
@@ -102,16 +75,15 @@ function toggleGameFavorite(id) {
   else favs.push(id);
   localStorage.setItem(GAMES_STORAGE, JSON.stringify(favs));
 }
-function isGameFavorite(id) { return getGameFavorites().includes(id); }
 
 // State
-let gamesAllZones   = [];   // all loaded zones across providers
-let gamesFiltered   = [];   // after search/sort/filter
-let gamesSort       = localStorage.getItem("mos_games_sort") || "popular";
-let gamesFilter     = "all"; // "all" | "favorites" | provider key
-let gamesSearch     = "";
-let gamesLoading    = false;
-let gamesPlayingId  = null; // id of currently playing game
+let gamesAllZones  = [];
+let gamesFiltered  = [];
+let gamesSort      = localStorage.getItem("mos_games_sort") || "name";
+let gamesFilter    = "all";
+let gamesSearch    = "";
+let gamesLoading   = false;
+let gamesPlayingId = null;
 
 function openGames() {
   const existing = document.getElementById("win-games");
@@ -166,16 +138,13 @@ function openGames() {
 
         <div class="games-sidebar-section">SORT BY</div>
         <select class="games-sort-select" id="games-sort-select" onchange="gamesSetSort(this.value)">
-          <option value="popular"  ${gamesSort==='popular' ?'selected':''}>Most Popular</option>
           <option value="name"     ${gamesSort==='name'    ?'selected':''}>Name (A–Z)</option>
-          <option value="id"       ${gamesSort==='id'      ?'selected':''}>Newest First</option>
           <option value="featured" ${gamesSort==='featured'?'selected':''}>Featured First</option>
         </select>
       </div>
 
       <!-- Main content -->
       <div class="games-main">
-        <!-- Top bar -->
         <div class="games-topbar">
           <input
             class="games-search"
@@ -190,9 +159,8 @@ function openGames() {
           <span class="games-count" id="games-count">Loading…</span>
         </div>
 
-        <!-- Grid -->
         <div class="games-grid" id="games-grid">
-          <div class="games-loading" id="games-loading">
+          <div class="games-loading">
             <div class="games-spinner"></div>
             <span>Loading games…</span>
           </div>
@@ -226,7 +194,6 @@ function openGames() {
   openWindows["win-games"] = { title: "Games", iconId: "games" };
   refreshTaskbar();
 
-  // Load games
   gamesLoadAll();
 }
 
@@ -239,14 +206,12 @@ async function gamesLoadAll() {
   gridEl.innerHTML = `<div class="games-loading"><div class="games-spinner"></div><span>Loading games…</span></div>`;
 
   const results = await Promise.allSettled(
-    Object.entries(GAME_PROVIDERS).map(async ([key, provider]) => {
-      const zones = await provider.fetchZones();
-      return zones;
-    })
+    Object.entries(GAME_PROVIDERS).map(async ([, provider]) => provider.fetchZones())
   );
 
   results.forEach((r) => {
     if (r.status === "fulfilled") gamesAllZones.push(...r.value);
+    else console.warn("[Games] Provider failed:", r.reason);
   });
 
   gamesLoading = false;
@@ -256,7 +221,6 @@ async function gamesLoadAll() {
 function gamesApplyFilters() {
   let zones = [...gamesAllZones];
 
-  // Filter by provider/favorites
   if (gamesFilter === "favorites") {
     const favs = getGameFavorites();
     zones = zones.filter((z) => favs.includes(z.id));
@@ -264,21 +228,13 @@ function gamesApplyFilters() {
     zones = zones.filter((z) => z.provider === gamesFilter);
   }
 
-  // Search
   if (gamesSearch.trim()) {
     const q = gamesSearch.toLowerCase();
-    zones = zones.filter(
-      (z) => z.name.toLowerCase().includes(q) || z.author.toLowerCase().includes(q)
-    );
+    zones = zones.filter((z) => z.name.toLowerCase().includes(q));
   }
 
-  // Sort
-  if (gamesSort === "popular") {
-    zones.sort((a, b) => b.popularity - a.popularity);
-  } else if (gamesSort === "name") {
+  if (gamesSort === "name") {
     zones.sort((a, b) => a.name.localeCompare(b.name));
-  } else if (gamesSort === "id") {
-    zones.sort((a, b) => parseInt(b.id) - parseInt(a.id));
   } else if (gamesSort === "featured") {
     zones.sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0));
   }
@@ -292,7 +248,7 @@ function gamesRenderGrid() {
   const countEl = document.getElementById("games-count");
   if (!gridEl) return;
 
-  if (countEl) countEl.textContent = `${gamesFiltered.length} game${gamesFiltered.length!==1?"s":""}`;
+  if (countEl) countEl.textContent = `${gamesFiltered.length} game${gamesFiltered.length !== 1 ? "s" : ""}`;
 
   if (!gamesFiltered.length) {
     gridEl.innerHTML = `<div class="games-empty">
@@ -307,7 +263,7 @@ function gamesRenderGrid() {
 
   const favs = getGameFavorites();
   gridEl.innerHTML = gamesFiltered.map((z) => {
-    const isFav = favs.includes(z.id);
+    const isFav    = favs.includes(z.id);
     const provider = GAME_PROVIDERS[z.provider];
     return `<div class="games-card" onclick="gamesPlay('${z.id}')">
       <div class="games-card-cover">
@@ -320,102 +276,58 @@ function gamesRenderGrid() {
               </svg>
             </div>`
         }
-        ${z.featured ? `<div class="games-card-badge">⬡ Featured</div>` : ""}
-        <button class="games-card-fav ${isFav?"active":""}" onclick="event.stopPropagation();gamesToggleFav('${z.id}')" title="${isFav?"Remove from favorites":"Add to favorites"}">
-          <svg width="11" height="11" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z" fill="${isFav?"currentColor":"none"}" stroke="currentColor" stroke-width="1.5"/></svg>
+        <button class="games-card-fav ${isFav ? "active" : ""}" onclick="event.stopPropagation();gamesToggleFav('${z.id}')" title="${isFav ? "Remove from favorites" : "Add to favorites"}">
+          <svg width="11" height="11" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z" fill="${isFav ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.5"/></svg>
         </button>
       </div>
       <div class="games-card-info">
         <div class="games-card-name">${gamesEsc(z.name)}</div>
         <div class="games-card-meta">
-          <span style="color:${provider?.color||"var(--text-dim)"}">●</span>
+          <span style="color:${provider?.color || "var(--text-dim)"}">●</span>
           ${gamesEsc(z.author)}
         </div>
       </div>
     </div>`;
   }).join("");
-
-  // Lazy load images with IntersectionObserver
-  const imgs = gridEl.querySelectorAll("img[loading=lazy]");
-  if ("IntersectionObserver" in window) {
-    const obs = new IntersectionObserver((entries) => {
-      entries.forEach((e) => {
-        if (e.isIntersecting) {
-          const img = e.target;
-          obs.unobserve(img);
-        }
-      });
-    }, { rootMargin: "200px" });
-    imgs.forEach((img) => obs.observe(img));
-  }
 }
 
-async function gamesPlay(id) {
+function gamesPlay(id) {
   const zone = gamesAllZones.find((z) => z.id === id);
   if (!zone) return;
 
-  // If it's an external link, open in the OS browser
-  if (zone.externalUrl) {
-    openBrowser();
-    setTimeout(() => {
-      const addr = document.getElementById("sj-address");
-      if (addr) {
-        addr.value = zone.externalUrl;
-        document.getElementById("sj-go")?.click();
-      }
-    }, 120);
-    return;
-  }
+  const url = zone.externalUrl || zone.contentUrl;
+  if (!url) return;
 
-  // Otherwise load the game HTML inline
-  const playerEl     = document.getElementById("games-player");
-  const frameWrapEl  = document.getElementById("games-player-frame");
-  const titleEl      = document.getElementById("games-player-title");
-  const gridEl       = document.getElementById("games-grid");
-  const topbarEl     = document.querySelector("#win-games .games-topbar");
+  const playerEl    = document.getElementById("games-player");
+  const frameWrapEl = document.getElementById("games-player-frame");
+  const titleEl     = document.getElementById("games-player-title");
+  const gridEl      = document.getElementById("games-grid");
+  const topbarEl    = document.querySelector("#win-games .games-topbar");
   if (!playerEl || !frameWrapEl) return;
 
   titleEl.textContent = zone.name;
   gamesPlayingId = id;
 
-  // Show loading state
   frameWrapEl.innerHTML = `<div class="games-player-loading"><div class="games-spinner"></div><span>Loading ${gamesEsc(zone.name)}…</span></div>`;
   playerEl.style.display = "flex";
   gridEl.style.display   = "none";
   if (topbarEl) topbarEl.style.display = "none";
 
-  try {
-    // Fetch through our proxy to avoid CORS issues
-    const proxyUrl = "/proxy/fetch?url=" + encodeURIComponent(zone.contentUrl + "?t=" + Date.now());
-    const res  = await fetch(proxyUrl);
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const html = await res.text();
+  // Embed via iframe — 3kho games are hosted on GitHub Pages
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "width:100%;height:100%;border:none;background:#000";
+  iframe.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock");
+  iframe.setAttribute("allow", "autoplay; fullscreen; encrypted-media; pointer-lock");
 
-    const iframe = document.createElement("iframe");
-    iframe.style.cssText = "width:100%;height:100%;border:none;background:#000";
-    iframe.sandbox = "allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock";
-    iframe.setAttribute("allow", "autoplay; fullscreen; encrypted-media; pointer-lock");
-    frameWrapEl.innerHTML = "";
-    frameWrapEl.appendChild(iframe);
+  iframe.onload = () => {
+    // Clear loading overlay once iframe signals it loaded
+    const loader = frameWrapEl.querySelector(".games-player-loading");
+    if (loader) loader.remove();
+  };
 
-    iframe.contentDocument.open();
-    iframe.contentDocument.write(html);
-    iframe.contentDocument.close();
-
-    // Re-run any scripts the write() may have missed
-    iframe.contentDocument.querySelectorAll("script").forEach((old) => {
-      const s = iframe.contentDocument.createElement("script");
-      if (old.src) s.src = old.src;
-      else s.textContent = old.textContent;
-      iframe.contentDocument.body?.appendChild(s);
-    });
-
-  } catch (err) {
-    frameWrapEl.innerHTML = `<div class="games-player-loading" style="color:#ff6b6b">
-      Failed to load game: ${gamesEsc(err.message)}<br>
-      <button onclick="gamesPlay('${id}')" style="margin-top:12px;background:var(--gold);color:#000;border:none;border-radius:5px;padding:6px 16px;font-family:var(--mono);font-size:11px;cursor:pointer">Retry</button>
-    </div>`;
-  }
+  frameWrapEl.innerHTML = "";
+  frameWrapEl.appendChild(iframe);
+  iframe.src = url;
 }
 
 function gamesClosePlayer() {
@@ -451,7 +363,6 @@ function gamesOpenInBrowser() {
 
 function gamesSetFilter(f) {
   gamesFilter = f;
-  // Update active state in sidebar
   document.querySelectorAll(".games-sidebar-item").forEach((el) => {
     const onclick = el.getAttribute("onclick") || "";
     el.classList.toggle("active", onclick.includes(`'${f}'`));
@@ -472,10 +383,8 @@ function gamesOnSearch(val) {
 
 function gamesToggleFav(id) {
   toggleGameFavorite(id);
-  // Update badge
   const badge = document.getElementById("games-fav-count");
   if (badge) badge.textContent = getGameFavorites().length;
-  // Re-render without losing scroll
   const gridEl = document.getElementById("games-grid");
   const scrollTop = gridEl?.scrollTop || 0;
   gamesRenderGrid();
