@@ -44,7 +44,8 @@ async function fetchGnMathZones() {
     if (shaRes.ok) {
       const shaJson = await shaRes.json();
       const sha = shaJson?.[0]?.sha;
-      if (sha) zonesUrl = `https://cdn.jsdelivr.net/gh/gn-math/assets@${sha}/zones.json`;
+      // jsdelivr requires short SHAs (8 chars), not full 40-char SHAs
+      if (sha) zonesUrl = `https://cdn.jsdelivr.net/gh/gn-math/assets@${sha.slice(0, 8)}/zones.json`;
     }
   } catch (_) {}
 
@@ -341,7 +342,6 @@ function gamesRenderGrid() {
       entries.forEach((e) => {
         if (e.isIntersecting) {
           const img = e.target;
-          // src already set via attribute; just ensure it loads
           obs.unobserve(img);
         }
       });
