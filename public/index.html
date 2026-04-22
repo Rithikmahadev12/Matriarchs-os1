@@ -6,14 +6,15 @@
     <title>Matriarchs OS</title>
     <link rel="shortcut icon" content="favicon.webp" />
 
-
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
 
     <link rel="stylesheet" href="index.css" />
+    <link rel="stylesheet" href="games.css" />
     <script src="register-sw.js" defer></script>
     <script src="search.js" defer></script>
     <script src="index.js" defer></script>
+    <script src="games.js" defer></script>
   </head>
   <body>
 
@@ -82,6 +83,11 @@
           <path d="M12 2L4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
           <path d="M8 12l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </symbol>
+        <!-- GAMES ICON -->
+        <symbol id="ico-games" viewBox="0 0 24 24">
+          <path d="M6 12h4M8 10v4M15 12h.01M18 11h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M2 8a4 4 0 014-4h12a4 4 0 014 4v8a4 4 0 01-4 4H6a4 4 0 01-4-4z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        </symbol>
       </defs>
     </svg>
 
@@ -99,13 +105,11 @@
 
         <div class="auth-divider"></div>
 
-        <!-- Tab switcher -->
         <div class="auth-tabs">
           <button class="auth-tab active" id="tab-login" onclick="switchAuthTab('login')">LOGIN</button>
           <button class="auth-tab" id="tab-signup" onclick="switchAuthTab('signup')">CREATE ACCOUNT</button>
         </div>
 
-        <!-- Login form -->
         <div class="auth-form" id="auth-login-form">
           <div class="auth-field">
             <svg width="15" height="15" viewBox="0 0 24 24" class="auth-field-icon"><use href="#ico-user"/></svg>
@@ -122,7 +126,6 @@
           </button>
         </div>
 
-        <!-- Signup form -->
         <div class="auth-form" id="auth-signup-form" style="display:none">
           <div class="auth-field">
             <svg width="15" height="15" viewBox="0 0 24 24" class="auth-field-icon"><use href="#ico-user"/></svg>
@@ -220,7 +223,6 @@
           <span class="bar-menu" onclick="openBrowser()">Browser</span>
           <span class="bar-menu" onclick="openAbout()">About</span>
           <span class="bar-menu">Help</span>
-          <!-- Owner-only menu item injected by JS -->
         </div>
         <div class="topbar-right">
           <span id="topbar-user"></span>
@@ -232,57 +234,63 @@
       </div>
 
       <!-- DESKTOP ICONS -->
-<div id="desktop-icons">
-  <div class="desktop-icon" onclick="openBrowser()">
-    <div class="icon-img">
-      <svg width="32" height="32" viewBox="0 0 24 24"><use href="#ico-globe"/></svg>
-    </div>
-    <span>Browser</span>
-  </div>
+      <div id="desktop-icons">
+        <div class="desktop-icon" onclick="openBrowser()">
+          <div class="icon-img">
+            <svg width="32" height="32" viewBox="0 0 24 24"><use href="#ico-globe"/></svg>
+          </div>
+          <span>Browser</span>
+        </div>
 
-  <div class="desktop-icon" onclick="openAbout()">
-    <div class="icon-img">
-      <svg width="32" height="32" viewBox="0 0 24 24"><use href="#ico-hex"/></svg>
-    </div>
-    <span>About</span>
-  </div>
+        <div class="desktop-icon" onclick="openAbout()">
+          <div class="icon-img">
+            <svg width="32" height="32" viewBox="0 0 24 24"><use href="#ico-hex"/></svg>
+          </div>
+          <span>About</span>
+        </div>
 
-  <div class="desktop-icon" onclick="openFiles()">
-    <div class="icon-img">
-      <svg width="32" height="32" viewBox="0 0 24 24"><use href="#ico-files"/></svg>
-    </div>
-    <span>Files</span>
-  </div>
+        <div class="desktop-icon" onclick="openFiles()">
+          <div class="icon-img">
+            <svg width="32" height="32" viewBox="0 0 24 24"><use href="#ico-files"/></svg>
+          </div>
+          <span>Files</span>
+        </div>
 
-  <div class="desktop-icon" onclick="openTerminal()">
-    <div class="icon-img">
-      <svg width="32" height="32" viewBox="0 0 24 24"><use href="#ico-term"/></svg>
-    </div>
-    <span>Terminal</span>
-  </div>
+        <div class="desktop-icon" onclick="openTerminal()">
+          <div class="icon-img">
+            <svg width="32" height="32" viewBox="0 0 24 24"><use href="#ico-term"/></svg>
+          </div>
+          <span>Terminal</span>
+        </div>
 
-  <div class="desktop-icon" onclick="openCalculator()">
-    <div class="icon-img">
-      <svg width="32" height="32" viewBox="0 0 24 24"><use href="#ico-calc"/></svg>
-    </div>
-    <span>Calculator</span>
-  </div>
+        <div class="desktop-icon" onclick="openCalculator()">
+          <div class="icon-img">
+            <svg width="32" height="32" viewBox="0 0 24 24"><use href="#ico-calc"/></svg>
+          </div>
+          <span>Calculator</span>
+        </div>
 
-  <!-- TikTok FIXED (inside container) -->
-  <div class="desktop-icon" onclick="openTikTok()">
-    <div class="icon-img">
-      <svg width="32" height="32" viewBox="0 0 24 24"><use href="#ico-globe"/></svg>
-    </div>
-    <span>TikTok</span>
-  </div>
+        <div class="desktop-icon" onclick="openTikTok()">
+          <div class="icon-img">
+            <svg width="32" height="32" viewBox="0 0 24 24"><use href="#ico-globe"/></svg>
+          </div>
+          <span>TikTok</span>
+        </div>
 
-  <!-- Admin icon injected by JS -->
-</div>
+        <!-- GAMES ICON -->
+        <div class="desktop-icon" onclick="openGames()">
+          <div class="icon-img">
+            <svg width="32" height="32" viewBox="0 0 24 24"><use href="#ico-games"/></svg>
+          </div>
+          <span>Games</span>
+        </div>
+
+      </div>
 
       <!-- WINDOWS LAYER -->
       <div id="windows"></div>
 
-      <!-- TASKBAR (bottom) -->
+      <!-- TASKBAR -->
       <div id="taskbar">
         <button class="taskbar-start" onclick="toggleStartMenu()" title="Start">
           <svg width="16" height="16" viewBox="0 0 24 24" style="color:var(--gold)">
@@ -330,7 +338,11 @@
             <div class="sm-app-icon"><svg width="20" height="20" viewBox="0 0 24 24"><use href="#ico-cog"/></svg></div>
             <span>Settings</span>
           </div>
-          <!-- Owner app injected by JS -->
+          <!-- GAMES in start menu -->
+          <div class="sm-app" onclick="openGames();toggleStartMenu()">
+            <div class="sm-app-icon"><svg width="20" height="20" viewBox="0 0 24 24"><use href="#ico-games"/></svg></div>
+            <span>Games</span>
+          </div>
         </div>
       </div>
 
@@ -358,13 +370,9 @@
             <button class="nav-btn" id="sj-reload">
               <svg width="16" height="16" viewBox="0 0 16 16"><use href="#ico-reload"/></svg>
             </button>
-            <input id="sj-search-engine" value="https://search.brave.com/search?q=%s" type="hidden" />
+            <!-- engine picker injected by JS here -->
             <input id="sj-address" type="text" placeholder="Search or enter URL…" autocomplete="off" spellcheck="false" />
             <button id="sj-go">GO</button>
-          </div>
-          <div id="sj-error-wrap">
-            <p id="sj-error"></p>
-            <pre id="sj-error-code"></pre>
           </div>
           <div id="sj-frame-wrap"></div>
         </div>
