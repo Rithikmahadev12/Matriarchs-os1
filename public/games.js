@@ -43,21 +43,21 @@ async function fetch3khoZones() {
 
   if (!data) throw new Error("Failed to fetch 3kho games: " + (lastErr?.message || "unknown"));
 
-  const resolveUrl = (u) => {
-    if (!u) return null;
-    if (u.startsWith("http")) return u;
-    return THREEKHO_BASE + (u.startsWith("/") ? u : "/" + u);
-  };
+const resolveUrl = (u) => {
+  if (!u) return null;
+  if (u.startsWith("http")) return u;
+  return THREEKHO_BASE + "/" + u;  // note: "/" + u, not just u
+};
 
   return data.map((g, i) => ({
     id:          String(i),
-    name:        g.name || "Unknown",
+    name:        g.title  || "Unknown",
     author:      "3kh0",
     featured:    false,
     provider:    "3kho",
-    coverUrl:    resolveUrl(g.img),
+    coverUrl:    resolveUrl(g.imgSrc),
     contentUrl:  null,
-    externalUrl: resolveUrl(g.url),
+    externalUrl: resolveUrl(g.link),
     popularity:  0,
     tags:        [],
   }));
