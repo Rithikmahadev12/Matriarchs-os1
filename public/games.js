@@ -16,8 +16,7 @@ const GAME_PROVIDERS = {
 };
 
 // ── 3kho provider ────────────────────────────────────────────────────────────
-// games.json format: [{ "name": "...", "img": "...", "url": "..." }, ...]
-// img/url may be relative paths like "/projects/slope/index.html"
+// games.json format: [{ "title": "...", "imgSrc": "...", "link": "..." }, ...]
 
 const THREEKHO_BASE = "https://3kho.github.io";
 const THREEKHO_JSON_URLS = [
@@ -43,11 +42,11 @@ async function fetch3khoZones() {
 
   if (!data) throw new Error("Failed to fetch 3kho games: " + (lastErr?.message || "unknown"));
 
-const resolveUrl = (u) => {
-  if (!u) return null;
-  if (u.startsWith("http")) return u;
-  return THREEKHO_BASE + "/" + u;  // note: "/" + u, not just u
-};
+  const resolveUrl = (u) => {
+    if (!u) return null;
+    if (u.startsWith("http")) return u;
+    return THREEKHO_BASE + "/" + u;
+  };
 
   return data.map((g, i) => ({
     id:          String(i),
@@ -313,21 +312,29 @@ function gamesPlay(id) {
   gridEl.style.display   = "none";
   if (topbarEl) topbarEl.style.display = "none";
 
-  // Embed via iframe — 3kho games are hosted on GitHub Pages
+  // Route through your existing proxy to bypass X-Frame-Options / connection refusals
+  const proxyUrl = "/proxy/?url=" + encodeURIComponent(url);
+
   const iframe = document.createElement("iframe");
   iframe.style.cssText = "width:100%;height:100%;border:none;background:#000";
   iframe.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock");
   iframe.setAttribute("allow", "autoplay; fullscreen; encrypted-media; pointer-lock");
+  iframe.src = proxyUrl;
 
+  // Clear loader once iframe fires load (may not fire cross-origin, fallback below)
   iframe.onload = () => {
-    // Clear loading overlay once iframe signals it loaded
     const loader = frameWrapEl.querySelector(".games-player-loading");
     if (loader) loader.remove();
   };
 
   frameWrapEl.innerHTML = "";
   frameWrapEl.appendChild(iframe);
-  iframe.src = url;
+
+  // Fallback: remove loader after 4s regardless (cross-origin iframes don't always fire onload)
+  setTimeout(() => {
+    const loader = frameWrapEl.querySelector(".games-player-loading");
+    if (loader) loader.remove();
+  }, 4000);
 }
 
 function gamesClosePlayer() {
