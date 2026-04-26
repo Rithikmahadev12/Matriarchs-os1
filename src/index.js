@@ -1,7 +1,5 @@
 import { createServer } from "node:http";
 import { fileURLToPath } from "url";
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 
@@ -11,13 +9,21 @@ const bareMuxDir  = fileURLToPath(new URL("../node_modules/@mercuryworkshop/bare
 const wispDir     = fileURLToPath(new URL("../node_modules/@mercuryworkshop/wisp-js/dist/",  import.meta.url));
 
 // ── Wisp WebSocket server ─────────────────────────────────────────────────────
-// Wisp tunnels the actual TCP traffic for Scramjet — it's what makes the proxy
-// actually work for modern sites instead of the old fetch-and-rewrite approach.
+// Wisp tunnels the actual TCP traffic for Scramjet.
 
 let wispServer = null;
 try {
-  const { WispServer } = await import("@mercuryworkshop/wisp-js/server");
-  wispServer = new WispServer({ logLevel: 0 });
+  // wisp-js exports a server helper — try a few known paths
+  let mod;
+  try { mod = await import("@mercuryworkshop/wisp-js/server"); }
+  catch { mod = await import("@mercuryworkshop/wisp-js"); }
+  const WispServer = mod.WispServer || mod.default?.WispServer;
+  if (WispServer) {
+    wispServer = new WispServer({ logLevel: 0 });
+    console.log("[wisp] WispServer ready");
+  } else {
+    console.warn("[wisp] WispServer constructor not found in module");
+  }
 } catch (e) {
   console.warn("[wisp] Could not load wisp-js server:", e.message);
 }
@@ -27,19 +33,26 @@ try {
 const fastify = Fastify({
   serverFactory: (handler) => {
     const server = createServer((req, res) => {
-      // Scramjet needs COEP/COOP to use SharedArrayBuffer (WASM threads)
-      res.setHeader("Cross-Origin-Opener-Policy",   "same-origin");
-      res.setHeader("Cross-Origin-Embedder-Policy",  "require-corp");
-      res.setHeader("Cross-Origin-Resource-Policy",  "cross-origin");
+      const url = req.url || "";
+
+      // COEP/COOP only on our own pages — NOT on proxy responses.
+      // Sending require-corp on proxied assets causes ERR_BLOCKED_BY_RESPONSE
+      // for third-party resources that don't send CORP headers themselves.
+      const isOurPage = !url.startsWith("/proxy/") && !url.startsWith("/scramjet/");
+      if (isOurPage) {
+        res.setHeader("Cross-Origin-Opener-Policy",  "same-origin");
+        res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+      }
+      // Everything needs CORP so it can be loaded cross-origin inside iframes
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
       handler(req, res);
     });
 
-    // Attach Wisp WebSocket upgrade handler
     server.on("upgrade", (req, socket, head) => {
       if (wispServer && req.url.startsWith("/wisp/")) {
         wispServer.routeRequest(req, socket, head);
       } else {
-        socket.destroy();
+        socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
       }
     });
 
@@ -103,8 +116,7 @@ self.__scramjet$config = {
   `.trim());
 });
 
-// ── Legacy fallback proxy (for non-SW environments / images / assets) ─────────
-// This is a simple pass-through that adds CORP headers so images etc. load.
+// ── Shared helpers ────────────────────────────────────────────────────────────
 
 const BLOCKED = new Set(["localhost","127.0.0.1","0.0.0.0","::1","169.254.169.254"]);
 function isBlocked(h) {
@@ -113,41 +125,60 @@ function isBlocked(h) {
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+// Headers we must strip from upstream responses to avoid breaking the proxy
+const STRIP_RES = new Set([
+  "content-encoding",        // we decode the body ourselves
+  "transfer-encoding",
+  "x-frame-options",         // allow embedding
+  "content-security-policy", // allow inline scripts / mixed content
+  "cross-origin-opener-policy",
+  "cross-origin-embedder-policy",
+  "cross-origin-resource-policy",
+]);
+
+async function upstreamFetch(targetUrl, acceptHeader) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    return await fetch(targetUrl, {
+      signal: ctrl.signal,
+      redirect: "follow",
+      headers: {
+        "User-Agent": UA,
+        "Accept": acceptHeader || "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": new URL(targetUrl).origin + "/",
+      },
+    });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ── /proxy/fetch — asset pass-through ────────────────────────────────────────
+// Used as a fallback when Scramjet SW isn't active yet, and by the legacy
+// browser code path.
+
 fastify.get("/proxy/fetch", async (req, reply) => {
   const target = req.query.url;
   if (!target) return reply.code(400).send("Missing ?url=");
   let targetUrl;
-  try { targetUrl = new URL(target); } catch { return reply.code(400).send("Invalid URL"); }
-  if (isBlocked(targetUrl.hostname)) return reply.code(403).send("Blocked");
+  try { targetUrl = new URL(target).toString(); }
+  catch { return reply.code(400).send("Invalid URL"); }
+  if (isBlocked(new URL(targetUrl).hostname)) return reply.code(403).send("Blocked");
 
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 20000);
-    let res;
-    try {
-      res = await fetch(targetUrl.toString(), {
-        signal: ctrl.signal,
-        redirect: "follow",
-        headers: {
-          "User-Agent": UA,
-          "Accept": req.headers["accept"] || "*/*",
-          "Accept-Language": "en-US,en;q=0.9",
-          "Referer": targetUrl.origin + "/",
-        },
-      });
-    } finally { clearTimeout(t); }
+    const upstream = await upstreamFetch(targetUrl, req.headers["accept"]);
 
-    // Forward most headers but strip the problematic ones
-    const skip = new Set(["content-encoding","transfer-encoding","x-frame-options",
-      "content-security-policy","cross-origin-opener-policy","cross-origin-embedder-policy"]);
-    for (const [k, v] of res.headers.entries()) {
-      if (!skip.has(k.toLowerCase())) reply.header(k, v);
+    for (const [k, v] of upstream.headers.entries()) {
+      if (!STRIP_RES.has(k.toLowerCase())) reply.header(k, v);
     }
-    reply.header("access-control-allow-origin", "*");
+    // Inject the headers that let the response load inside our COEP context
+    reply.header("access-control-allow-origin",  "*");
     reply.header("access-control-allow-headers", "*");
     reply.header("cross-origin-resource-policy", "cross-origin");
 
-    return reply.send(Buffer.from(await res.arrayBuffer()));
+    return reply.send(Buffer.from(await upstream.arrayBuffer()));
   } catch (err) {
     console.error("[proxy/fetch]", err.message);
     return reply.code(502).send("Proxy error: " + err.message);
