@@ -759,31 +759,10 @@ document.addEventListener("click",(e)=>{
   }
 });
 
+
 // ══════════════════════════════════════
-//  BROWSER WINDOW — Scramjet edition
+//  BROWSER WINDOW — Proxy + Scramjet
 // ══════════════════════════════════════
-
-// ── Scramjet URL encoding ─────────────────────────────────────────────────────
-// Wait for __scramjetReady (set by register-sw.js) then use controller.encodeUrl.
-// Falls back to /proxy/fetch if SW isn't controlling yet.
-
-function scramjetEncode(rawUrl) {
-  if (window.__scramjet && typeof window.__scramjet.encodeUrl === "function") {
-    return window.__scramjet.encodeUrl(rawUrl);
-  }
-  return "/proxy/fetch?url=" + encodeURIComponent(rawUrl);
-}
-
-function buildProxyUrl(rawUrl) {
-  let url = rawUrl.trim();
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    url = url.includes(" ") || !url.includes(".") ? getSearchUrl(url) : "https://" + url;
-  }
-  const swControlling = !!navigator.serviceWorker?.controller;
-  return swControlling ? scramjetEncode(url) : "/proxy/fetch?url=" + encodeURIComponent(url);
-}
-
-// ── Search engines ────────────────────────────────────────────────────────────
 
 const SEARCH_ENGINES = {
   brave:     { label: "Brave",      url: "https://search.brave.com/search?q=%s" },
@@ -800,7 +779,22 @@ function getSearchUrl(q) {
   return e.url.replace("%s", encodeURIComponent(q));
 }
 
-// ── openBrowser ───────────────────────────────────────────────────────────────
+// Build a proxy URL for the given raw URL.
+// When Scramjet SW is controlling → use /scramjet/?url= (scramjet handles everything)
+// Otherwise → use /proxy/?url= (server-side HTML rewriting)
+function buildProxyUrl(rawUrl) {
+  let url = rawUrl.trim();
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    url = url.includes(" ") || !url.includes(".") ? getSearchUrl(url) : "https://" + url;
+  }
+  const swControlling = !!navigator.serviceWorker?.controller;
+  if (swControlling && window.__scramjetReady) {
+    // Scramjet SW is active — send through /scramjet/ prefix
+    return "/scramjet/?url=" + encodeURIComponent(url);
+  }
+  // Fallback: server-side proxy (HTML rewriting)
+  return "/proxy/?url=" + encodeURIComponent(url);
+}
 
 function openBrowser(initialUrl) {
   const existing = document.getElementById("win-browser");
@@ -880,16 +874,19 @@ function openBrowser(initialUrl) {
   let navHistory = [];
   let navIdx = -1;
 
-  // No sandbox attr — Scramjet SW needs unobstructed subresource interception.
-  // The "escape" warning only matters for same-origin untrusted content, which
-  // we don't serve — all content is proxied through a different origin path.
-  function createIframe(proxied) {
+  function createIframe(proxied, realUrl) {
     frameWrap.innerHTML = "";
     const iframe = document.createElement("iframe");
     iframe.style.cssText = "width:100%;height:100%;border:none;background:#fff;display:block;";
     iframe.setAttribute("allow", "autoplay; fullscreen; encrypted-media");
     frameWrap.appendChild(iframe);
     iframe.src = proxied;
+
+    // Update address bar from messages sent by injected script
+    iframe.addEventListener("load", () => {
+      if (realUrl) addrEl.value = realUrl;
+    });
+
     return iframe;
   }
 
@@ -905,9 +902,10 @@ function openBrowser(initialUrl) {
     if (!rawUrl || !rawUrl.trim()) return;
     const url = resolveUrl(rawUrl);
     addrEl.value = url;
-    createIframe(buildProxyUrl(url));
+    const proxied = buildProxyUrl(url);
+    createIframe(proxied, url);
     navHistory = navHistory.slice(0, navIdx + 1);
-    navHistory.push(url);
+    navHistory.push({ url, proxied });
     navIdx = navHistory.length - 1;
     updateNavBtns();
   }
@@ -923,9 +921,9 @@ function openBrowser(initialUrl) {
 
   function navTo(idx) {
     navIdx = idx;
-    const url = navHistory[navIdx];
+    const { url, proxied } = navHistory[navIdx];
     addrEl.value = url;
-    createIframe(buildProxyUrl(url));
+    createIframe(proxied, url);
     updateNavBtns();
   }
 
@@ -942,26 +940,15 @@ function openBrowser(initialUrl) {
   document.getElementById("sj-reload")?.addEventListener("click", () => {
     const iframe = frameWrap.querySelector("iframe");
     if (!iframe) return;
-    const src = iframe.src;
-    frameWrap.innerHTML = "";
-    const ni = document.createElement("iframe");
-    ni.style.cssText = "width:100%;height:100%;border:none;background:#fff;display:block;";
-    ni.setAttribute("allow", "autoplay; fullscreen; encrypted-media");
-    frameWrap.appendChild(ni);
-    ni.src = src;
+    const entry = navHistory[navIdx];
+    if (entry) { frameWrap.innerHTML = ""; createIframe(entry.proxied, entry.url); }
   });
 
-  // Scramjet posts messages to update the address bar on SPA nav
+  // Listen for nav messages from injected proxy script
   window.addEventListener("message", (e) => {
     if (!e.data) return;
-    if (e.data.type === "mos-nav" && e.data.url) addrEl.value = e.data.url;
-    if (e.data.type === "__scramjet$navigate" && e.data.url) {
-      try {
-        const real = window.__scramjet?.decodeUrl
-          ? window.__scramjet.decodeUrl(e.data.url)
-          : e.data.url;
-        addrEl.value = real;
-      } catch {}
+    if (e.data.type === "mos-nav" && e.data.url) {
+      addrEl.value = e.data.url;
     }
   });
 
@@ -974,6 +961,8 @@ function browserNavigate(url) {
   if (win && win._navigate) win._navigate(url);
   else openBrowser(url);
 }
+
+
 // ══════════════════════════════════════
 //  YOUTUBE APP
 // ══════════════════════════════════════
