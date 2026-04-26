@@ -1,7 +1,8 @@
 "use strict";
 
 // ══════════════════════════════════════
-//  MATRIARCHS OS — Scramjet SW Loader
+//  MATRIARCHS OS — Scramjet Loader
+//  Works with scramjet v1.x (npm stable)
 // ══════════════════════════════════════
 
 window.__scramjetReady = false;
@@ -19,16 +20,16 @@ async function loadScript(src) {
 
 async function initScramjet() {
   if (!("serviceWorker" in navigator)) {
-    console.warn("[MOS] No service worker support");
+    console.warn("[MOS] No service worker support — using server proxy only");
     return;
   }
 
-  // 1. Unregister anything that isn't Scramjet's SW
+  // 1. Remove stale non-scramjet service workers
   try {
     const regs = await navigator.serviceWorker.getRegistrations();
     for (const reg of regs) {
       const url = reg.scriptURL || "";
-      if (!url.includes("scramjet.serviceWorker")) {
+      if (!url.includes("scramjet-sw")) {
         console.log("[MOS] Removing stale SW:", reg.scope);
         await reg.unregister();
       }
@@ -37,64 +38,40 @@ async function initScramjet() {
     console.warn("[MOS] Could not clean old SWs:", e.message);
   }
 
-  // 2. Register Scramjet's SW
+  // 2. Register our scramjet SW bootstrap
   try {
-    await navigator.serviceWorker.register(
-      "/scramjet/scramjet.serviceWorker.js",
-      { scope: "/" }
-    );
+    await navigator.serviceWorker.register("/scramjet-sw.js", { scope: "/" });
     console.log("[MOS] Scramjet SW registered");
   } catch (err) {
-    console.error("[MOS] Scramjet SW registration failed:", err);
+    console.warn("[MOS] Scramjet SW registration failed:", err.message, "— server proxy fallback active");
     return;
   }
 
-  // 3. Wait for SW to be ready
+  // 3. Wait for SW to be controlling
   await navigator.serviceWorker.ready;
   console.log("[MOS] SW ready");
 
-  // 4. Load bare-mux + scramjet shared runtime
-  await loadScript("/baremux/bare.cjs");
-  await loadScript("/scramjet/scramjet.shared.js");
+  // 4. Load BareMux runtime
+  await loadScript("/baremux/index.js");
 
-  // 5. Set Wisp as bare-mux transport
+  // 5. Set Wisp as the transport
   try {
-    if (window.BareMux) {
+    if (window.BareMux && window.BareMux.BareMuxConnection) {
       const conn = new window.BareMux.BareMuxConnection("/baremux/worker.js");
       const protocol = location.protocol === "https:" ? "wss" : "ws";
-      await conn.setTransport("/wisp-js/index.js", [
+      await conn.setTransport("/wisp-js/wisp-client.js", [
         { wisp: `${protocol}://${location.host}/wisp/` }
       ]);
-      console.log("[MOS] Wisp transport set");
+      console.log("[MOS] Wisp transport set via BareMux");
     } else {
-      console.warn("[MOS] BareMux not found on window after script load");
+      console.warn("[MOS] BareMux not available on window");
     }
   } catch (err) {
-    console.warn("[MOS] Wisp transport error:", err);
+    console.warn("[MOS] Wisp transport error:", err.message);
   }
 
-  // 6. Init Scramjet controller
-  try {
-    if (window.ScramjetController) {
-      const controller = new window.ScramjetController({
-        prefix: "/scramjet/",
-        codec:  "/scramjet/scramjet.codecs.js",
-        wasm:   "/scramjet/scramjet.wasm.js",
-        shared: "/scramjet/scramjet.shared.js",
-        worker: "/scramjet/scramjet.worker.js",
-      });
-      await controller.init("/scramjet/scramjet.serviceWorker.js");
-      window.__scramjet = controller;
-      window.__scramjetReady = true;
-      console.log("[MOS] Scramjet controller ready ✦");
-    } else {
-      console.warn("[MOS] ScramjetController not on window — SW handles encoding directly");
-      window.__scramjetReady = true;
-    }
-  } catch (err) {
-    console.warn("[MOS] Scramjet controller init error:", err);
-    window.__scramjetReady = true;
-  }
+  window.__scramjetReady = true;
+  console.log("[MOS] Scramjet ready ✦");
 }
 
 if (document.readyState === "loading") {
