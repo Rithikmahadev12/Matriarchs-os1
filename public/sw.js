@@ -1,60 +1,45 @@
+"use strict";
+
 // ══════════════════════════════════════
-//  MATRIARCHS OS — PROXY SERVICE WORKER
-//  Scope: /proxy/
-//  Intercepts ALL external resource requests
-//  from proxied pages (CSS, JS, images, XHR, fetch)
+//  MATRIARCHS OS — Scramjet Service Worker Bootstrap
+//  Loads scramjet v1.x with correct dist file names
 // ══════════════════════════════════════
 
-const VERSION = "mos-proxy-v4";
-const PROXY_ORIGIN = self.location.origin;
+// 1. Load codecs (sets self.__scramjet$codecs)
+importScripts("/scramjet/scramjet.codecs.js");
 
-self.addEventListener("install", (e) => {
-  console.log("[MOS SW] Installing", VERSION);
-  e.waitUntil(self.skipWaiting());
-});
+// 2. Set config with correct server paths
+self.__scramjet$config = {
+  prefix: "/scramjet/",
+  codec: self.__scramjet$codecs.plain,
+  config: "/scramjet/scramjet.config.js",
+  bundle: "/scramjet/scramjet.bundle.js",
+  worker: "/scramjet/scramjet-sw.js",
+  client: "/scramjet/scramjet.client.js",
+  codecs: "/scramjet/scramjet.codecs.js",
+};
 
-self.addEventListener("activate", (e) => {
-  console.log("[MOS SW] Activating", VERSION);
-  e.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(keys.map(k => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
-});
+// 3. Load rewriter bundle (sets self.__scramjet$bundle)
+importScripts("/scramjet/scramjet.bundle.js");
+
+// 4. Load the scramjet worker class (includes BareMux client)
+importScripts("/scramjet/scramjet.worker.js");
+
+// 5. Instantiate and wire up fetch handler
+const sw = new ScramjetServiceWorker();
 
 self.addEventListener("fetch", (event) => {
-  const req = event.request;
-  const url = new URL(req.url);
-
-  // Pass through same-origin requests (our own server)
-  if (url.origin === PROXY_ORIGIN) return;
-
-  // Skip navigate mode — handled by HTML rewriter + click interceptor
-  // (navigate = full page loads from link clicks)
-  if (req.mode === "navigate") return;
-
-  // All other external requests — CSS, JS, images, fonts, XHR, fetch
-  // Route through our /proxy/fetch endpoint
-  event.respondWith(handleResource(req, url));
+  if (sw.route(event)) {
+    event.respondWith(sw.fetch(event));
+  }
 });
 
-async function handleResource(req, url) {
-  const proxyUrl = PROXY_ORIGIN + "/proxy/fetch?url=" + encodeURIComponent(url.toString());
+self.addEventListener("install", () => {
+  console.log("[SJ SW] Installing");
+  self.skipWaiting();
+});
 
-  try {
-    const res = await fetch(proxyUrl, {
-      method: "GET",
-      headers: {
-        "Accept": req.headers.get("accept") || "*/*",
-        "Accept-Language": req.headers.get("accept-language") || "en-US,en;q=0.9",
-      },
-    });
-    return res;
-  } catch (err) {
-    console.error("[MOS SW] Fetch error:", err.message, url.toString());
-    return new Response("SW proxy error: " + err.message, {
-      status: 502,
-      headers: { "Content-Type": "text/plain" },
-    });
-  }
-}
+self.addEventListener("activate", (event) => {
+  console.log("[SJ SW] Activated");
+  event.waitUntil(self.clients.claim());
+});
