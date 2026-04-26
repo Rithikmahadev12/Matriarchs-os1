@@ -2,7 +2,7 @@
 
 // ══════════════════════════════════════
 //  MATRIARCHS OS — Scramjet Loader
-//  Works with scramjet v1.x (npm stable)
+//  Fixed for bare-mux v2.x API
 // ══════════════════════════════════════
 
 window.__scramjetReady = false;
@@ -54,20 +54,38 @@ async function initScramjet() {
   // 4. Load BareMux runtime
   await loadScript("/baremux/index.js");
 
-  // 5. Set Wisp as the transport
+  // 5. Set Wisp as the transport — bare-mux v2 API
   try {
-    if (window.BareMux && window.BareMux.BareMuxConnection) {
-      const conn = new window.BareMux.BareMuxConnection("/baremux/worker.js");
-      const protocol = location.protocol === "https:" ? "wss" : "ws";
-      await conn.setTransport("/wisp-js/wisp-client.js", [
-        { wisp: `${protocol}://${location.host}/wisp/` }
-      ]);
-      console.log("[MOS] Wisp transport set via BareMux");
+    const protocol = location.protocol === "https:" ? "wss" : "ws";
+    const wispUrl  = `${protocol}://${location.host}/wisp/`;
+
+    // bare-mux v2 exposes a flat setTransport function, not a class constructor
+    if (typeof window.setTransport === "function") {
+      // v2 flat API
+      await window.setTransport("/wisp-js/wisp-client.js", [{ wisp: wispUrl }]);
+      console.log("[MOS] Wisp transport set via flat setTransport (v2)");
+
+    } else if (window.BareMux) {
+      // Try v2 style: BareMux.setTransport
+      if (typeof window.BareMux.setTransport === "function") {
+        await window.BareMux.setTransport("/wisp-js/wisp-client.js", [{ wisp: wispUrl }]);
+        console.log("[MOS] Wisp transport set via BareMux.setTransport (v2)");
+
+      // Fallback: v1 style class constructor
+      } else if (window.BareMux.BareMuxConnection) {
+        const conn = new window.BareMux.BareMuxConnection("/baremux/worker.js");
+        await conn.setTransport("/wisp-js/wisp-client.js", [{ wisp: wispUrl }]);
+        console.log("[MOS] Wisp transport set via BareMuxConnection (v1)");
+
+      } else {
+        console.warn("[MOS] BareMux found but no known API surface — dumping:", Object.keys(window.BareMux));
+      }
     } else {
-      console.warn("[MOS] BareMux not available on window");
+      console.warn("[MOS] BareMux not available on window after loading /baremux/index.js");
     }
   } catch (err) {
     console.warn("[MOS] Wisp transport error:", err.message);
+    // Not fatal — scramjet may still work if the SW already has a transport cached
   }
 
   window.__scramjetReady = true;
