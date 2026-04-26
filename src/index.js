@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { readdirSync } from "node:fs";
 import { fileURLToPath } from "url";
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
@@ -223,6 +224,17 @@ fastify.get("/api/tiktok/search", async (req, reply) => {
 });
 fastify.get("/api/tiktok/trending", async (req, reply) => {
   try { const res = await fetch("https://www.tiktok.com/api/recommend/itemlist/?recommendGeo=US&count=20", { headers:{"User-Agent":UA,"Referer":"https://www.tiktok.com/"} }); return reply.send(await res.json()); } catch (err) { return reply.code(502).send({ error: err.message }); }
+});
+
+
+// ── /api/diag — list dist dir contents ───────────────────────────────────────
+fastify.get("/api/diag", async (req, reply) => {
+  const dirs = { scramjet: scramjetDir, baremux: bareMuxDir, wisp: wispDir };
+  const out = {};
+  for (const [k, d] of Object.entries(dirs)) {
+    try { out[k] = readdirSync(d); } catch(e) { out[k] = e.message; }
+  }
+  return reply.send(out);
 });
 
 fastify.setNotFoundHandler((req, reply) => reply.code(404).type("text/html").sendFile("404.html"));
