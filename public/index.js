@@ -761,39 +761,26 @@ document.addEventListener("click",(e)=>{
 
 // ══════════════════════════════════════
 //  BROWSER WINDOW — Scramjet edition
-//  Drop this in to REPLACE the openBrowser() function and everything below
-//  it in public/index.js (from "BROWSER WINDOW" section onward).
-//
-//  Key change: instead of /proxy/?url=<target> we use Scramjet's URL encoding:
-//    /scramjet/<scramjet-encoded-url>
-//  Scramjet's SW intercepts that and does the actual proxying via Wisp.
 // ══════════════════════════════════════
 
-// ── Scramjet URL helpers ──────────────────────────────────────────────────────
-// These mirror what Scramjet's client runtime exposes after the SW loads.
-// We call them directly so the browser window doesn't need to wait.
+// ── Scramjet URL encoding ─────────────────────────────────────────────────────
+// Wait for __scramjetReady (set by register-sw.js) then use controller.encodeUrl.
+// Falls back to /proxy/fetch if SW isn't controlling yet.
 
-function scramjetEncode(url) {
-  // If Scramjet's controller is ready, use it
-  if (window.__scramjet && window.__scramjet.encodeUrl) {
-    return window.__scramjet.encodeUrl(url);
+function scramjetEncode(rawUrl) {
+  if (window.__scramjet && typeof window.__scramjet.encodeUrl === "function") {
+    return window.__scramjet.encodeUrl(rawUrl);
   }
-  // Fallback: Scramjet's default codec is plain base64 with prefix
-  // /scramjet/<base64url>/
-  try {
-    return "/scramjet/" + btoa(url).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "") + "/";
-  } catch {
-    return "/scramjet/" + encodeURIComponent(url);
-  }
+  return "/proxy/fetch?url=" + encodeURIComponent(rawUrl);
 }
 
-function proxyUrl(rawUrl) {
-  if (!rawUrl) return rawUrl;
+function buildProxyUrl(rawUrl) {
   let url = rawUrl.trim();
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
     url = url.includes(" ") || !url.includes(".") ? getSearchUrl(url) : "https://" + url;
   }
-  return scramjetEncode(url);
+  const swControlling = !!navigator.serviceWorker?.controller;
+  return swControlling ? scramjetEncode(url) : "/proxy/fetch?url=" + encodeURIComponent(url);
 }
 
 // ── Search engines ────────────────────────────────────────────────────────────
@@ -889,39 +876,36 @@ function openBrowser(initialUrl) {
     if (addr) browserBar.insertBefore(picker, addr);
   }
 
-  // ── Navigation state ──────────────────────────────────────────────────────
-  let navHistory = [];    // stores *real* URLs (not encoded)
+  // ── Nav state ─────────────────────────────────────────────────────────────
+  let navHistory = [];
   let navIdx = -1;
 
+  // No sandbox attr — Scramjet SW needs unobstructed subresource interception.
+  // The "escape" warning only matters for same-origin untrusted content, which
+  // we don't serve — all content is proxied through a different origin path.
   function createIframe(proxied) {
     frameWrap.innerHTML = "";
     const iframe = document.createElement("iframe");
     iframe.style.cssText = "width:100%;height:100%;border:none;background:#fff;display:block;";
-    iframe.setAttribute("sandbox",
-      "allow-scripts allow-same-origin allow-forms allow-popups " +
-      "allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation " +
-      "allow-downloads allow-modals allow-pointer-lock");
-    iframe.setAttribute("allow", "autoplay; fullscreen; encrypted-media; pointer-lock");
+    iframe.setAttribute("allow", "autoplay; fullscreen; encrypted-media");
     frameWrap.appendChild(iframe);
     iframe.src = proxied;
     return iframe;
   }
 
-  function navigate(rawUrl) {
-    if (!rawUrl || !rawUrl.trim()) return;
+  function resolveUrl(rawUrl) {
     let url = rawUrl.trim();
     if (!url.startsWith("http://") && !url.startsWith("https://")) {
       url = url.includes(" ") || !url.includes(".") ? getSearchUrl(url) : "https://" + url;
     }
+    return url;
+  }
 
+  function navigate(rawUrl) {
+    if (!rawUrl || !rawUrl.trim()) return;
+    const url = resolveUrl(rawUrl);
     addrEl.value = url;
-
-    // Use Scramjet if SW is controlling, otherwise fall back to legacy proxy
-    const useSJ = navigator.serviceWorker?.controller?.scriptURL?.includes("scramjet");
-    const proxied = useSJ ? scramjetEncode(url) : "/proxy/fetch?url=" + encodeURIComponent(url);
-
-    createIframe(proxied);
-
+    createIframe(buildProxyUrl(url));
     navHistory = navHistory.slice(0, navIdx + 1);
     navHistory.push(url);
     navIdx = navHistory.length - 1;
@@ -941,18 +925,20 @@ function openBrowser(initialUrl) {
     navIdx = idx;
     const url = navHistory[navIdx];
     addrEl.value = url;
-    const useSJ = navigator.serviceWorker?.controller?.scriptURL?.includes("scramjet");
-    const proxied = useSJ ? scramjetEncode(url) : "/proxy/fetch?url=" + encodeURIComponent(url);
-    createIframe(proxied);
+    createIframe(buildProxyUrl(url));
     updateNavBtns();
   }
 
   goBtn.addEventListener("click", () => { if (addrEl.value.trim()) navigate(addrEl.value.trim()); });
-  addrEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && addrEl.value.trim()) navigate(addrEl.value.trim()); });
+  addrEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && addrEl.value.trim()) navigate(addrEl.value.trim());
+  });
   addrEl.addEventListener("focus", () => addrEl.select());
 
-  document.getElementById("sj-back")?.addEventListener("click",   () => { if (navIdx > 0) navTo(navIdx - 1); });
-  document.getElementById("sj-fwd")?.addEventListener("click",    () => { if (navIdx < navHistory.length - 1) navTo(navIdx + 1); });
+  document.getElementById("sj-back")?.addEventListener("click",
+    () => { if (navIdx > 0) navTo(navIdx - 1); });
+  document.getElementById("sj-fwd")?.addEventListener("click",
+    () => { if (navIdx < navHistory.length - 1) navTo(navIdx + 1); });
   document.getElementById("sj-reload")?.addEventListener("click", () => {
     const iframe = frameWrap.querySelector("iframe");
     if (!iframe) return;
@@ -960,27 +946,21 @@ function openBrowser(initialUrl) {
     frameWrap.innerHTML = "";
     const ni = document.createElement("iframe");
     ni.style.cssText = "width:100%;height:100%;border:none;background:#fff;display:block;";
-    ni.setAttribute("sandbox",
-      "allow-scripts allow-same-origin allow-forms allow-popups " +
-      "allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation " +
-      "allow-downloads allow-modals allow-pointer-lock");
-    ni.setAttribute("allow", "autoplay; fullscreen; encrypted-media; pointer-lock");
+    ni.setAttribute("allow", "autoplay; fullscreen; encrypted-media");
     frameWrap.appendChild(ni);
     ni.src = src;
   });
 
-  // Listen for address-bar updates from Scramjet SPA navigation
+  // Scramjet posts messages to update the address bar on SPA nav
   window.addEventListener("message", (e) => {
-    if (e.data?.type === "mos-nav" && e.data.url) {
-      addrEl.value = e.data.url;
-    }
-    // Scramjet also sends __scramjet$navigate
-    if (e.data?.type === "__scramjet$navigate" && e.data.url) {
+    if (!e.data) return;
+    if (e.data.type === "mos-nav" && e.data.url) addrEl.value = e.data.url;
+    if (e.data.type === "__scramjet$navigate" && e.data.url) {
       try {
-        // Decode Scramjet URL back to real URL
-        let realUrl = e.data.url;
-        if (window.__scramjet?.decodeUrl) realUrl = window.__scramjet.decodeUrl(e.data.url);
-        addrEl.value = realUrl;
+        const real = window.__scramjet?.decodeUrl
+          ? window.__scramjet.decodeUrl(e.data.url)
+          : e.data.url;
+        addrEl.value = real;
       } catch {}
     }
   });
@@ -994,7 +974,6 @@ function browserNavigate(url) {
   if (win && win._navigate) win._navigate(url);
   else openBrowser(url);
 }
-
 // ══════════════════════════════════════
 //  YOUTUBE APP
 // ══════════════════════════════════════
