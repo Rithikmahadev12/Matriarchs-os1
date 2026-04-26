@@ -10,21 +10,51 @@ const wispDir     = fileURLToPath(new URL("../node_modules/@mercuryworkshop/wisp
 
 // ── Wisp WebSocket server ─────────────────────────────────────────────────────
 
-let wispServer = null;
-try {
-  let mod;
-  try { mod = await import("@mercuryworkshop/wisp-js/server"); }
-  catch { mod = await import("@mercuryworkshop/wisp-js"); }
-  const WispServer = mod.WispServer || mod.default?.WispServer;
-  if (WispServer) {
-    wispServer = new WispServer({ logLevel: 0 });
-    console.log("[wisp] WispServer ready");
-  } else {
-    console.warn("[wisp] WispServer not found in module exports");
+let wispHandler = null;
+
+async function loadWisp() {
+  // wisp-js v0.4.x ships a server export — try every known path
+  const attempts = [
+    () => import("@mercuryworkshop/wisp-js/server"),
+    () => import("@mercuryworkshop/wisp-js"),
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      const mod = await attempt();
+      console.log("[wisp] module keys:", Object.keys(mod));
+
+      // v0.4.x: routeRequest is a bare function export
+      if (typeof mod.routeRequest === "function") {
+        wispHandler = mod.routeRequest;
+        console.log("[wisp] Using routeRequest function export");
+        return;
+      }
+
+      // class-based: WispServer
+      const WispServer = mod.WispServer ?? mod.default?.WispServer;
+      if (WispServer) {
+        const srv = new WispServer({ logLevel: 0 });
+        wispHandler = srv.routeRequest.bind(srv);
+        console.log("[wisp] Using WispServer class");
+        return;
+      }
+
+      // default export that is itself a handler function
+      if (typeof mod.default === "function") {
+        wispHandler = mod.default;
+        console.log("[wisp] Using default function export");
+        return;
+      }
+    } catch (e) {
+      console.warn("[wisp] attempt failed:", e.message);
+    }
   }
-} catch (e) {
-  console.warn("[wisp] Could not load wisp-js:", e.message);
+
+  console.error("[wisp] Could not load wisp-js — WebSocket proxy will not work");
 }
+
+await loadWisp();
 
 // ── Fastify ───────────────────────────────────────────────────────────────────
 
@@ -45,8 +75,13 @@ const fastify = Fastify({
     });
 
     server.on("upgrade", (req, socket, head) => {
-      if (wispServer && req.url.startsWith("/wisp/")) {
-        wispServer.routeRequest(req, socket, head);
+      if (wispHandler && req.url.startsWith("/wisp/")) {
+        try {
+          wispHandler(req, socket, head);
+        } catch (e) {
+          console.error("[wisp] routeRequest threw:", e.message);
+          socket.end("HTTP/1.1 500 Internal Server Error\r\n\r\n");
+        }
       } else {
         socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
       }
@@ -132,10 +167,8 @@ function proxyHeaders(reply) {
 // ── /proxy/ — full HTML page proxy ────────────────────────────────────────────
 
 function rewriteBody(html, base) {
-  // Strip CSP meta tags
   html = html.replace(/<meta[^>]+http-equiv=["']Content-Security-Policy["'][^>]*\/?>/gi, "");
 
-  // Rewrite src, href, action, srcset
   html = html.replace(/\bsrc\s*=\s*(["'])((?!data:|blob:|javascript:)[^"']+)\1/gi,
     (m, q, url) => `src=${q}${rewriteUrl(url, base, "fetch")}${q}`);
 
@@ -155,15 +188,12 @@ function rewriteBody(html, base) {
     return `srcset=${q}${rw}${q}`;
   });
 
-  // Inline style url() rewriting
   html = html.replace(/url\(\s*(["']?)((?!data:|blob:)[^"')]+)\1\s*\)/gi,
     (m, q, url) => `url(${q}${rewriteUrl(url, base, "fetch")}${q})`);
 
-  // Inject fetch/XHR/click hooks so subsequent navigation stays proxied
   const inject = `<script>
 (function(){
   var _b=${JSON.stringify(base)},_o=location.origin;
-  // fetch hook
   var _f=window.fetch;
   window.fetch=function(input,init){
     try{
@@ -175,7 +205,6 @@ function rewriteBody(html, base) {
     }catch(e){}
     return _f(input,init);
   };
-  // XHR hook
   var _xo=XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open=function(m,url){
     try{
@@ -186,13 +215,11 @@ function rewriteBody(html, base) {
     }catch(e){}
     return _xo.apply(this,arguments);
   };
-  // history.pushState hook to update address bar
   var _ps=history.pushState.bind(history);
   history.pushState=function(s,t,u){
     _ps(s,t,u);
     try{top.postMessage({type:"mos-nav",url:new URL(u,_b).toString()},"*");}catch(e){}
   };
-  // link click interceptor
   document.addEventListener("click",function(e){
     var el=e.target;
     while(el&&el.tagName!=="A")el=el.parentElement;
@@ -206,7 +233,6 @@ function rewriteBody(html, base) {
       top.location.href="/proxy/?url="+encodeURIComponent(u.toString());
     }catch(err){}
   },true);
-  // form submit interceptor
   document.addEventListener("submit",function(e){
     var form=e.target;
     if(!form||!form.action)return;
@@ -285,8 +311,6 @@ fastify.get("/proxy/", async (req, reply) => {
     );
   }
 });
-
-// ── /proxy/fetch — raw asset pass-through ─────────────────────────────────────
 
 fastify.get("/proxy/fetch", async (req, reply) => {
   const target = req.query.url;
@@ -425,6 +449,7 @@ fastify.server.on("listening", () => {
   const a = fastify.server.address();
   console.log(`✦ Matriarchs OS  http://localhost:${a.port}`);
   console.log(`  Wisp WS:       ws://localhost:${a.port}/wisp/`);
+  console.log(`  Wisp active:   ${!!wispHandler}`);
   console.log(`  Scramjet SW:   /scramjet-sw.js`);
   console.log(`  Server proxy:  /proxy/`);
 });
