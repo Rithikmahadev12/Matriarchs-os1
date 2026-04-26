@@ -8,6 +8,7 @@ const publicPath    = fileURLToPath(new URL("../public/",   import.meta.url));
 const scramjetDir   = fileURLToPath(new URL("../node_modules/@mercuryworkshop/scramjet/dist/",          import.meta.url));
 const bareMuxDir    = fileURLToPath(new URL("../node_modules/@mercuryworkshop/bare-mux/dist/",          import.meta.url));
 const wispDir       = fileURLToPath(new URL("../node_modules/@mercuryworkshop/wisp-js/dist/",           import.meta.url));
+// libcurl-transport/dist contains index.mjs — the BareTransport ES module
 const libcurlDir    = fileURLToPath(new URL("../node_modules/@mercuryworkshop/libcurl-transport/dist/", import.meta.url));
 
 // ── Wisp WebSocket server ─────────────────────────────────────────────────────
@@ -39,16 +40,30 @@ const fastify = Fastify({
   serverFactory: (handler) => {
     const server = createServer((req, res) => {
       const url = req.url || "";
-      const isProxy = url.startsWith("/proxy/") || url.startsWith("/scramjet/")
-                   || url.startsWith("/baremux/") || url.startsWith("/wisp-js/")
+
+      // Proxy and asset routes must NOT have COEP — they serve cross-origin content
+      const isProxy = url.startsWith("/proxy/")
+                   || url.startsWith("/scramjet/")
+                   || url.startsWith("/baremux/")
+                   || url.startsWith("/wisp-js/")
                    || url.startsWith("/libcurl/");
+
       if (!isProxy) {
         res.setHeader("Cross-Origin-Opener-Policy",  "same-origin");
         res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
       }
+
+      // All routes need cross-origin resource policy so SW/SharedWorker can import() them
       res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+
+      // Ensure .mjs files are served with the correct MIME type for dynamic import()
+      if (url.endsWith(".mjs")) {
+        res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+      }
+
       handler(req, res);
     });
+
     server.on("upgrade", (req, socket, head) => {
       if (wispHandler && req.url.startsWith("/wisp/")) {
         try { wispHandler(req, socket, head); }
@@ -57,17 +72,21 @@ const fastify = Fastify({
         socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
       }
     });
+
     return server;
   },
 });
 
 // ── Static files ──────────────────────────────────────────────────────────────
 
-fastify.register(fastifyStatic, { root: publicPath,  decorateReply: true,  setHeaders: r => r.setHeader("Cross-Origin-Resource-Policy","cross-origin") });
-fastify.register(fastifyStatic, { root: scramjetDir, prefix: "/scramjet/", decorateReply: false, setHeaders: r => r.setHeader("Cross-Origin-Resource-Policy","cross-origin") });
-fastify.register(fastifyStatic, { root: bareMuxDir,  prefix: "/baremux/",  decorateReply: false, setHeaders: r => r.setHeader("Cross-Origin-Resource-Policy","cross-origin") });
-fastify.register(fastifyStatic, { root: wispDir,     prefix: "/wisp-js/",  decorateReply: false, setHeaders: r => r.setHeader("Cross-Origin-Resource-Policy","cross-origin") });
-fastify.register(fastifyStatic, { root: libcurlDir,  prefix: "/libcurl/",  decorateReply: false, setHeaders: r => r.setHeader("Cross-Origin-Resource-Policy","cross-origin") });
+// setHeaders on each route for CORP
+const corsHeaders = (r) => r.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+
+fastify.register(fastifyStatic, { root: publicPath,  decorateReply: true,  setHeaders: corsHeaders });
+fastify.register(fastifyStatic, { root: scramjetDir, prefix: "/scramjet/", decorateReply: false, setHeaders: corsHeaders });
+fastify.register(fastifyStatic, { root: bareMuxDir,  prefix: "/baremux/",  decorateReply: false, setHeaders: corsHeaders });
+fastify.register(fastifyStatic, { root: wispDir,     prefix: "/wisp-js/",  decorateReply: false, setHeaders: corsHeaders });
+fastify.register(fastifyStatic, { root: libcurlDir,  prefix: "/libcurl/",  decorateReply: false, setHeaders: corsHeaders });
 
 // ── Diagnostics ───────────────────────────────────────────────────────────────
 
