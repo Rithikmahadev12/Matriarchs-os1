@@ -33,6 +33,9 @@ const fastify = Fastify({
     const server = createServer((req, res) => {
       const url = req.url || "";
 
+      // COEP/COOP only on our own app shell, not on proxied content.
+      // Proxied responses from third-party origins don't send CORP headers,
+      // so adding require-corp there causes ERR_BLOCKED_BY_RESPONSE.
       const isProxy = url.startsWith("/proxy/") || url.startsWith("/scramjet/")
                    || url.startsWith("/baremux/") || url.startsWith("/wisp-js/");
       if (!isProxy) {
@@ -125,11 +128,15 @@ function proxyHeaders(reply) {
   reply.header("cross-origin-resource-policy", "cross-origin");
 }
 
-// ── rewrite + proxy logic ─────────────────────────────────────────────────────
+// ── /proxy/ — full HTML page proxy (SW fallback) ──────────────────────────────
+// When Scramjet's SW hasn't activated yet (first visit, hard refresh),
+// the browser sends /proxy/?url=<target>. We fetch, rewrite, and serve it.
 
 function rewriteBody(html, base) {
+  // Strip CSP meta tags
   html = html.replace(/<meta[^>]+http-equiv=["']Content-Security-Policy["'][^>]*\/?>/gi, "");
 
+  // Rewrite src, href, action, srcset to go through /proxy/fetch
   html = html.replace(/\bsrc\s*=\s*(["'])((?!data:|blob:|javascript:)[^"']+)\1/gi,
     (m, q, url) => `src=${q}${rewriteUrl(url, base, "fetch")}${q}`);
 
@@ -139,60 +146,199 @@ function rewriteBody(html, base) {
   html = html.replace(/\baction\s*=\s*(["'])((?!javascript:)[^"']+)\1/gi,
     (m, q, url) => `action=${q}${rewriteUrl(url, base, "page")}${q}`);
 
+  html = html.replace(/\bsrcset\s*=\s*(["'])(.*?)\1/gi, (m, q, srcset) => {
+    const rw = srcset.split(",").map(part => {
+      const p = part.trim(), sp = p.search(/\s/);
+      const u = sp === -1 ? p : p.slice(0, sp);
+      const d = sp === -1 ? "" : p.slice(sp);
+      return rewriteUrl(u, base, "fetch") + d;
+    }).join(", ");
+    return `srcset=${q}${rw}${q}`;
+  });
+
+  // Inject fetch/XHR hook + click interceptor so subsequent nav stays proxied
+  const inject = `<script>
+(function(){
+  var _b=${JSON.stringify(base)},_o=location.origin;
+  // fetch hook
+  var _f=window.fetch;
+  window.fetch=function(input,init){
+    try{
+      var url=typeof input==="string"?input:(input instanceof Request?input.url:String(input));
+      if(url&&!url.startsWith("data:")&&!url.startsWith("blob:")){
+        var abs=new URL(url,_b).toString();
+        if(!abs.startsWith(_o))return _f("/proxy/fetch?url="+encodeURIComponent(abs),init);
+      }
+    }catch(e){}
+    return _f(input,init);
+  };
+  // XHR hook
+  var _xo=XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open=function(m,url){
+    try{
+      if(url&&!String(url).startsWith("data:")&&!String(url).startsWith("blob:")){
+        var abs=new URL(String(url),_b).toString();
+        if(!abs.startsWith(_o))arguments[1]="/proxy/fetch?url="+encodeURIComponent(abs);
+      }
+    }catch(e){}
+    return _xo.apply(this,arguments);
+  };
+  // link click interceptor
+  document.addEventListener("click",function(e){
+    var el=e.target;
+    while(el&&el.tagName!=="A")el=el.parentElement;
+    if(!el||!el.href)return;
+    var href=el.href;
+    if(!href||href.startsWith("#")||href.startsWith("javascript:")||href.startsWith("mailto:")||href.indexOf("/proxy/")!==-1)return;
+    try{
+      var u=new URL(href);
+      if(u.origin===_o)return;
+      e.preventDefault();e.stopPropagation();
+      top.location.href="/proxy/?url="+encodeURIComponent(u.toString());
+    }catch(err){}
+  },true);
+})();
+</script>`;
+
+  if (/<head[\s>]/i.test(html)) {
+    html = html.replace(/<head(\s[^>]*)?>/i, m => m + inject);
+  } else {
+    html = inject + html;
+  }
+
   return html;
 }
 
 function rewriteUrl(url, base, mode) {
+  if (!url) return url;
+  const u = url.trim();
+  if (!u || u.startsWith("/proxy/") || u.startsWith("data:") || u.startsWith("blob:")) return u;
   try {
-    const abs = new URL(url, base).toString();
+    const abs = new URL(u, base).toString();
     return mode === "page"
       ? "/proxy/?url=" + encodeURIComponent(abs)
       : "/proxy/fetch?url=" + encodeURIComponent(abs);
-  } catch {
-    return url;
-  }
+  } catch { return url; }
 }
-
-// ── Routes ────────────────────────────────────────────────────────────────────
 
 fastify.get("/proxy/", async (req, reply) => {
   const target = req.query.url;
-  if (!target) return reply.code(400).send("Missing url");
+  if (!target) return reply.code(400).type("text/html").send("<h2>Missing ?url=</h2>");
+
+  let targetUrl;
+  try { targetUrl = new URL(target).toString(); }
+  catch { return reply.code(400).type("text/html").send("<h2>Invalid URL</h2>"); }
+
+  const hostname = new URL(targetUrl).hostname;
+  if (isBlocked(hostname)) return reply.code(403).type("text/html").send("<h2>Blocked</h2>");
+
+  // Reject requests to our own host to break redirect loops
+  const reqHost = req.headers["host"] || "";
+  if (hostname === reqHost.split(":")[0]) {
+    return reply.code(400).type("text/html").send("<h2>Cannot proxy this origin</h2>");
+  }
 
   try {
-    const upstream = await upstreamFetch(target);
+    const upstream = await upstreamFetch(targetUrl, {
+      "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+      "Upgrade-Insecure-Requests": "1",
+    });
+
+    const ct = upstream.headers.get("content-type") || "";
+
+    // Non-HTML: redirect to /proxy/fetch
+    if (!ct.includes("text/html") && !ct.includes("xhtml")) {
+      return reply.redirect("/proxy/fetch?url=" + encodeURIComponent(targetUrl));
+    }
+
     let html = await upstream.text();
-    html = rewriteBody(html, target);
+    html = rewriteBody(html, targetUrl);
 
     proxyHeaders(reply);
-    reply.type("text/html").send(html);
+    reply.header("content-type", "text/html; charset=utf-8");
+    return reply.send(html);
   } catch (err) {
-    reply.code(500).send("Proxy error");
+    console.error("[proxy/]", err.message);
+    return reply.code(502).type("text/html").send(
+      `<h2 style="font-family:monospace;padding:40px;color:#ff6b6b">Proxy error: ${err.message}</h2>`
+    );
   }
 });
 
+// ── /proxy/fetch — raw asset pass-through ─────────────────────────────────────
+
 fastify.get("/proxy/fetch", async (req, reply) => {
   const target = req.query.url;
-  if (!target) return reply.code(400).send("Missing url");
+  if (!target) return reply.code(400).send("Missing ?url=");
 
-  const upstream = await upstreamFetch(target);
-  proxyHeaders(reply);
-  reply.send(Buffer.from(await upstream.arrayBuffer()));
+  let targetUrl;
+  try { targetUrl = new URL(target).toString(); }
+  catch { return reply.code(400).send("Invalid URL"); }
+
+  if (isBlocked(new URL(targetUrl).hostname)) return reply.code(403).send("Blocked");
+
+  // Break self-referential loops
+  const reqHost = req.headers["host"] || "";
+  if (new URL(targetUrl).hostname === reqHost.split(":")[0]) {
+    return reply.code(400).send("Cannot proxy this origin");
+  }
+
+  try {
+    const upstream = await upstreamFetch(targetUrl, {
+      "Accept": req.headers["accept"] || "*/*",
+    });
+
+    for (const [k, v] of upstream.headers.entries()) {
+      if (!STRIP_RES.has(k.toLowerCase())) reply.header(k, v);
+    }
+    proxyHeaders(reply);
+
+    return reply.send(Buffer.from(await upstream.arrayBuffer()));
+  } catch (err) {
+    console.error("[proxy/fetch]", err.message);
+    return reply.code(502).send("Proxy error: " + err.message);
+  }
 });
+
+// ── /api/search ───────────────────────────────────────────────────────────────
 
 fastify.get("/api/search", async (req, reply) => {
   const q = req.query.q;
   if (!q) return reply.code(400).send({ error: "Missing q" });
+  try {
+    const res = await fetch(
+      `https://search.brave.com/api/suggest?q=${encodeURIComponent(q)}&rich=true`,
+      { headers: { "User-Agent": UA, "Accept": "application/json" } }
+    );
+    const data = await res.json();
+    const results = (Array.isArray(data) ? data[1] || [] : []).map(s =>
+      typeof s === "string"
+        ? { title: s, url: `https://search.brave.com/search?q=${encodeURIComponent(s)}`, snippet: "" }
+        : { title: s.phrase || s, url: s.url || `https://search.brave.com/search?q=${encodeURIComponent(s.phrase||s)}`, snippet: s.desc || "" }
+    );
+    return reply.send({ results });
+  } catch (err) {
+    return reply.code(502).send({ error: err.message });
+  }
+});
 
-  const res = await fetch(
-    `https://search.brave.com/api/suggest?q=${encodeURIComponent(q)}&rich=true`
-  );
-  const data = await res.json();
+// ── 404 ───────────────────────────────────────────────────────────────────────
 
-  reply.send({ results: data[1] || [] });
+fastify.setNotFoundHandler((req, reply) => {
+  return reply.code(404).type("text/html").sendFile("404.html");
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
+
+fastify.server.on("listening", () => {
+  const a = fastify.server.address();
+  console.log(`✦ Matriarchs OS  http://localhost:${a.port}`);
+  console.log(`  Wisp WS:      ws://localhost:${a.port}/wisp/`);
+  console.log(`  Scramjet SW:  /scramjet/scramjet.serviceWorker.js`);
+});
+
+process.on("SIGINT",  () => { fastify.close(); process.exit(0); });
+process.on("SIGTERM", () => { fastify.close(); process.exit(0); });
 
 const port = parseInt(process.env.PORT || "") || 8080;
 fastify.listen({ port, host: "0.0.0.0" });
