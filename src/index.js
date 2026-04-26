@@ -34,8 +34,6 @@ const fastify = Fastify({
       const url = req.url || "";
 
       // COEP/COOP only on our own app shell, not on proxied content.
-      // Proxied responses from third-party origins don't send CORP headers,
-      // so adding require-corp there causes ERR_BLOCKED_BY_RESPONSE.
       const isProxy = url.startsWith("/proxy/") || url.startsWith("/scramjet/")
                    || url.startsWith("/baremux/") || url.startsWith("/wisp-js/");
       if (!isProxy) {
@@ -66,6 +64,7 @@ fastify.register(fastifyStatic, {
   setHeaders: (res) => { res.setHeader("Cross-Origin-Resource-Policy", "cross-origin"); },
 });
 
+// Scramjet v1.x dist files at /scramjet/
 fastify.register(fastifyStatic, {
   root: scramjetDir,
   prefix: "/scramjet/",
@@ -73,6 +72,7 @@ fastify.register(fastifyStatic, {
   setHeaders: (res) => { res.setHeader("Cross-Origin-Resource-Policy", "cross-origin"); },
 });
 
+// BareMux dist files at /baremux/
 fastify.register(fastifyStatic, {
   root: bareMuxDir,
   prefix: "/baremux/",
@@ -80,6 +80,7 @@ fastify.register(fastifyStatic, {
   setHeaders: (res) => { res.setHeader("Cross-Origin-Resource-Policy", "cross-origin"); },
 });
 
+// Wisp-js dist files at /wisp-js/
 fastify.register(fastifyStatic, {
   root: wispDir,
   prefix: "/wisp-js/",
@@ -128,15 +129,13 @@ function proxyHeaders(reply) {
   reply.header("cross-origin-resource-policy", "cross-origin");
 }
 
-// ── /proxy/ — full HTML page proxy (SW fallback) ──────────────────────────────
-// When Scramjet's SW hasn't activated yet (first visit, hard refresh),
-// the browser sends /proxy/?url=<target>. We fetch, rewrite, and serve it.
+// ── /proxy/ — full HTML page proxy ────────────────────────────────────────────
 
 function rewriteBody(html, base) {
   // Strip CSP meta tags
   html = html.replace(/<meta[^>]+http-equiv=["']Content-Security-Policy["'][^>]*\/?>/gi, "");
 
-  // Rewrite src, href, action, srcset to go through /proxy/fetch
+  // Rewrite src, href, action, srcset
   html = html.replace(/\bsrc\s*=\s*(["'])((?!data:|blob:|javascript:)[^"']+)\1/gi,
     (m, q, url) => `src=${q}${rewriteUrl(url, base, "fetch")}${q}`);
 
@@ -156,7 +155,11 @@ function rewriteBody(html, base) {
     return `srcset=${q}${rw}${q}`;
   });
 
-  // Inject fetch/XHR hook + click interceptor so subsequent nav stays proxied
+  // Inline style url() rewriting
+  html = html.replace(/url\(\s*(["']?)((?!data:|blob:)[^"')]+)\1\s*\)/gi,
+    (m, q, url) => `url(${q}${rewriteUrl(url, base, "fetch")}${q})`);
+
+  // Inject fetch/XHR/click hooks so subsequent navigation stays proxied
   const inject = `<script>
 (function(){
   var _b=${JSON.stringify(base)},_o=location.origin;
@@ -183,6 +186,12 @@ function rewriteBody(html, base) {
     }catch(e){}
     return _xo.apply(this,arguments);
   };
+  // history.pushState hook to update address bar
+  var _ps=history.pushState.bind(history);
+  history.pushState=function(s,t,u){
+    _ps(s,t,u);
+    try{top.postMessage({type:"mos-nav",url:new URL(u,_b).toString()},"*");}catch(e){}
+  };
   // link click interceptor
   document.addEventListener("click",function(e){
     var el=e.target;
@@ -195,6 +204,20 @@ function rewriteBody(html, base) {
       if(u.origin===_o)return;
       e.preventDefault();e.stopPropagation();
       top.location.href="/proxy/?url="+encodeURIComponent(u.toString());
+    }catch(err){}
+  },true);
+  // form submit interceptor
+  document.addEventListener("submit",function(e){
+    var form=e.target;
+    if(!form||!form.action)return;
+    try{
+      var u=new URL(form.action,_b);
+      if(u.origin===_o)return;
+      e.preventDefault();
+      var data=new FormData(form);
+      var q=new URLSearchParams(data).toString();
+      var target=u.toString()+(q?"?"+q:"");
+      top.location.href="/proxy/?url="+encodeURIComponent(target);
     }catch(err){}
   },true);
 })();
@@ -232,9 +255,8 @@ fastify.get("/proxy/", async (req, reply) => {
   const hostname = new URL(targetUrl).hostname;
   if (isBlocked(hostname)) return reply.code(403).type("text/html").send("<h2>Blocked</h2>");
 
-  // Reject requests to our own host to break redirect loops
-  const reqHost = req.headers["host"] || "";
-  if (hostname === reqHost.split(":")[0]) {
+  const reqHost = (req.headers["host"] || "").split(":")[0];
+  if (hostname === reqHost) {
     return reply.code(400).type("text/html").send("<h2>Cannot proxy this origin</h2>");
   }
 
@@ -246,7 +268,6 @@ fastify.get("/proxy/", async (req, reply) => {
 
     const ct = upstream.headers.get("content-type") || "";
 
-    // Non-HTML: redirect to /proxy/fetch
     if (!ct.includes("text/html") && !ct.includes("xhtml")) {
       return reply.redirect("/proxy/fetch?url=" + encodeURIComponent(targetUrl));
     }
@@ -277,9 +298,8 @@ fastify.get("/proxy/fetch", async (req, reply) => {
 
   if (isBlocked(new URL(targetUrl).hostname)) return reply.code(403).send("Blocked");
 
-  // Break self-referential loops
-  const reqHost = req.headers["host"] || "";
-  if (new URL(targetUrl).hostname === reqHost.split(":")[0]) {
+  const reqHost = (req.headers["host"] || "").split(":")[0];
+  if (new URL(targetUrl).hostname === reqHost) {
     return reply.code(400).send("Cannot proxy this origin");
   }
 
@@ -322,6 +342,77 @@ fastify.get("/api/search", async (req, reply) => {
   }
 });
 
+// ── YouTube API ───────────────────────────────────────────────────────────────
+
+const INVIDIOUS_INSTANCES = [
+  "https://invidious.io.lol",
+  "https://invidious.privacyredirect.com",
+  "https://vid.puffyan.us",
+];
+
+async function invidiousFetch(path) {
+  for (const base of INVIDIOUS_INSTANCES) {
+    try {
+      const res = await fetch(base + path, {
+        headers: { "User-Agent": UA },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.ok) return res.json();
+    } catch {}
+  }
+  throw new Error("All Invidious instances failed");
+}
+
+fastify.get("/api/youtube/search", async (req, reply) => {
+  const q = req.query.q;
+  if (!q) return reply.code(400).send({ error: "Missing q" });
+  try {
+    const data = await invidiousFetch(`/api/v1/search?q=${encodeURIComponent(q)}&type=video`);
+    return reply.send({ results: data });
+  } catch (err) {
+    return reply.code(502).send({ error: err.message });
+  }
+});
+
+fastify.get("/api/youtube/trending", async (req, reply) => {
+  try {
+    const data = await invidiousFetch("/api/v1/trending?type=default");
+    return reply.send({ results: data });
+  } catch (err) {
+    return reply.code(502).send({ error: err.message });
+  }
+});
+
+// ── TikTok API ────────────────────────────────────────────────────────────────
+
+fastify.get("/api/tiktok/search", async (req, reply) => {
+  const q = req.query.q;
+  if (!q) return reply.code(400).send({ error: "Missing q" });
+  try {
+    const res = await fetch(
+      `https://www.tiktok.com/api/search/general/full/?keyword=${encodeURIComponent(q)}&count=20`,
+      { headers: { "User-Agent": UA, "Referer": "https://www.tiktok.com/" } }
+    );
+    const data = await res.json();
+    return reply.send(data);
+  } catch (err) {
+    return reply.code(502).send({ error: err.message });
+  }
+});
+
+fastify.get("/api/tiktok/trending", async (req, reply) => {
+  try {
+    const res = await fetch(
+      "https://www.tiktok.com/api/recommend/itemlist/?recommendGeo=US&count=20",
+      { headers: { "User-Agent": UA, "Referer": "https://www.tiktok.com/" } }
+    );
+    const data = await res.json();
+    return reply.send(data);
+  } catch (err) {
+    return reply.code(502).send({ error: err.message });
+  }
+});
+
 // ── 404 ───────────────────────────────────────────────────────────────────────
 
 fastify.setNotFoundHandler((req, reply) => {
@@ -333,8 +424,9 @@ fastify.setNotFoundHandler((req, reply) => {
 fastify.server.on("listening", () => {
   const a = fastify.server.address();
   console.log(`✦ Matriarchs OS  http://localhost:${a.port}`);
-  console.log(`  Wisp WS:      ws://localhost:${a.port}/wisp/`);
-  console.log(`  Scramjet SW:  /scramjet/scramjet.serviceWorker.js`);
+  console.log(`  Wisp WS:       ws://localhost:${a.port}/wisp/`);
+  console.log(`  Scramjet SW:   /scramjet-sw.js`);
+  console.log(`  Server proxy:  /proxy/`);
 });
 
 process.on("SIGINT",  () => { fastify.close(); process.exit(0); });
