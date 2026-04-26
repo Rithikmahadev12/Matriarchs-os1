@@ -2,7 +2,7 @@
 
 // ══════════════════════════════════════
 //  MATRIARCHS OS — Scramjet Loader
-//  bare-mux v2.1.7 + wisp-js v0.4.1
+//  bare-mux v2.1.7 + libcurl-transport v1.5.2
 // ══════════════════════════════════════
 
 window.__scramjetReady = false;
@@ -18,131 +18,89 @@ async function loadScript(src) {
   });
 }
 
-// Probe which wisp transport file actually exists on our server
-async function findWispTransport() {
-  // wisp-js v0.4.x dist — the bare-mux transport worker.
-  // The dist folder is served at /wisp-js/ — try known filenames in order.
-  const candidates = [
-    "/wisp-js/wisp-client.js",    // some builds
-    "/wisp-js/client.js",         // matches 'client' export key in wisp-js
-    "/wisp-js/index.js",          // fallback
-  ];
-  for (const path of candidates) {
-    try {
-      const r = await fetch(path, { method: "HEAD" });
-      if (r.ok) { console.log("[MOS] Found wisp transport:", path); return path; }
-    } catch {}
-  }
-  console.warn("[MOS] No wisp transport file found — listing /wisp-js/ to diagnose");
-  // Try a GET on the dir (won't work but gives a 404 vs network error clue)
-  return null;
-}
-
-async function setWispTransport(wispUrl) {
-  const transportPath = await findWispTransport();
-  if (!transportPath) {
-    console.error("[MOS] Cannot set transport — wisp client file not found");
+async function initScramjet() {
+  if (!("serviceWorker" in navigator)) {
+    console.warn("[MOS] No SW support — server proxy only");
     return;
   }
 
-  // bare-mux v2 requires an absolute URL for the transport worker
-  const transportUrl = new URL(transportPath, location.origin).toString();
-  const opts = [{ wisp: wispUrl }];
-
-  console.log("[MOS] Setting transport:", transportUrl, "→ wisp:", wispUrl);
-
-  const bm = window.BareMux;
-
-  // BareMuxConnection is confirmed present and instantiable
-  // The constructor takes NO arguments in v2 — worker path is baked in
-  if (typeof bm.BareMuxConnection === "function") {
-    // Try with no args first (v2 style — worker URL is internal)
-    let conn;
-    try {
-      conn = new bm.BareMuxConnection();
-      console.log("[MOS] BareMuxConnection() (no args) OK");
-    } catch(e) {
-      console.log("[MOS] BareMuxConnection() no-args failed:", e.message);
-      // Fall back to passing worker path
-      conn = new bm.BareMuxConnection("/baremux/worker.js");
-      console.log("[MOS] BareMuxConnection('/baremux/worker.js') OK");
-    }
-
-    if (typeof conn.setTransport === "function") {
-      await conn.setTransport(transportUrl, opts);
-      console.log("[MOS] ✓ Transport set via BareMuxConnection.setTransport");
-      return;
-    }
-    if (typeof conn.setClient === "function") {
-      await conn.setClient(transportUrl, opts);
-      console.log("[MOS] ✓ Transport set via BareMuxConnection.setClient");
-      return;
-    }
-    console.log("[MOS] BareMuxConnection instance methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(conn)));
-  }
-
-  // WorkerConnection is also exported — try that
-  if (typeof bm.WorkerConnection === "function") {
-    try {
-      const conn = new bm.WorkerConnection("/baremux/worker.js");
-      if (typeof conn.setTransport === "function") {
-        await conn.setTransport(transportUrl, opts);
-        console.log("[MOS] ✓ Transport set via WorkerConnection.setTransport");
-        return;
-      }
-    } catch(e) { console.log("[MOS] WorkerConnection failed:", e.message); }
-  }
-
-  // BareClient — try it
-  if (typeof bm.BareClient === "function") {
-    try {
-      const client = new bm.BareClient();
-      console.log("[MOS] BareClient instance methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(client)));
-    } catch(e) { console.log("[MOS] BareClient failed:", e.message); }
-  }
-
-  console.error("[MOS] ✗ All transport methods exhausted");
-}
-
-async function initScramjet() {
-  if (!("serviceWorker" in navigator)) {
-    console.warn("[MOS] No SW support — server proxy only"); return;
-  }
-
-  // Remove stale SWs
+  // ── 1. Remove stale service workers ──────────────────────────────────────
   try {
     for (const reg of await navigator.serviceWorker.getRegistrations()) {
-      if (!(reg.scriptURL||"").includes("scramjet-sw")) {
+      if (!(reg.scriptURL || "").includes("scramjet-sw")) {
         await reg.unregister();
         console.log("[MOS] Removed stale SW:", reg.scope);
       }
     }
-  } catch(e) { console.warn("[MOS] SW cleanup error:", e.message); }
+  } catch (e) {
+    console.warn("[MOS] SW cleanup error:", e.message);
+  }
 
-  // Register scramjet SW
+  // ── 2. Register scramjet SW ───────────────────────────────────────────────
   try {
     await navigator.serviceWorker.register("/scramjet-sw.js", { scope: "/" });
     console.log("[MOS] SW registered");
-  } catch(err) {
-    console.warn("[MOS] SW registration failed:", err.message); return;
+  } catch (err) {
+    console.warn("[MOS] SW registration failed:", err.message);
+    return;
   }
 
   await navigator.serviceWorker.ready;
   console.log("[MOS] SW ready");
 
-  // Load bare-mux
+  // ── 3. Load bare-mux (sets window.BareMux) ───────────────────────────────
   await loadScript("/baremux/index.js");
 
-  // Set wisp transport
-  try {
-    const protocol = location.protocol === "https:" ? "wss" : "ws";
-    await setWispTransport(`${protocol}://${location.host}/wisp/`);
-  } catch(err) {
-    console.error("[MOS] Transport setup error:", err.message, err.stack);
+  if (!window.BareMux) {
+    console.error("[MOS] BareMux not found — server proxy fallback only");
+    return;
   }
 
-  window.__scramjetReady = true;
-  console.log("[MOS] Init complete ✦");
+  // ── 4. Set transport ──────────────────────────────────────────────────────
+  // bare-mux v2 setTransport(moduleUrl, constructorArgs[]):
+  //   moduleUrl       → ES module with `export default` BareTransport class
+  //   constructorArgs → spread as: new BareTransport(...constructorArgs)
+  //
+  // LibcurlClient constructor: new LibcurlClient({ wisp: "wss://host/wisp/" })
+  // Server serves @mercuryworkshop/libcurl-transport/dist/ at /libcurl/
+
+  const protocol  = location.protocol === "https:" ? "wss" : "ws";
+  const wispUrl   = `${protocol}://${location.host}/wisp/`;
+
+  // Prefer .mjs (true ES module) for dynamic import() compatibility
+  const candidates = ["/libcurl/index.mjs", "/libcurl/index.js"];
+  let transportUrl = null;
+
+  for (const path of candidates) {
+    try {
+      const r = await fetch(path, { method: "HEAD" });
+      if (r.ok) { transportUrl = new URL(path, location.origin).toString(); break; }
+    } catch {}
+  }
+
+  if (!transportUrl) {
+    console.error("[MOS] No transport module found at /libcurl/ — server proxy fallback");
+    return;
+  }
+
+  console.log("[MOS] Transport module:", transportUrl, "→ wisp:", wispUrl);
+
+  try {
+    // BareMuxConnection(workerPath): must point to bare-mux's own worker.js
+    const conn = new BareMux.BareMuxConnection("/baremux/worker.js");
+
+    // setTransport dynamically imports the module URL inside the worker,
+    // then calls: new DefaultExport(...constructorArgs)
+    // LibcurlClient takes one options object as its sole argument.
+    await conn.setTransport(transportUrl, [{ wisp: wispUrl }]);
+
+    console.log("[MOS] ✓ Transport ready");
+    window.__scramjetReady = true;
+  } catch (err) {
+    console.error("[MOS] Transport setup error:", err.message);
+  }
+
+  console.log("[MOS] Init complete ✦  scramjetReady =", window.__scramjetReady);
 }
 
 if (document.readyState === "loading") {
